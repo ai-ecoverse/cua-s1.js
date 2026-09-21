@@ -10,7 +10,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5          # vendor/cua (the upstream submodule) is only needed to re-export
       - uses: actions/setup-node@v5
-        with: { node-version: 22, cache: npm }
+        with: { node-version: 24, cache: npm }
       - run: npm ci
       - run: npm run typecheck
       - run: npm run build:lib
