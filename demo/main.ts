@@ -6,6 +6,10 @@ import { extractEntities, loadCuaS1, type CuaS1, type Decision, type Element, ty
 ort.env.wasm.wasmPaths = { wasm, mjs };
 ort.env.wasm.numThreads = 1;   // a 3 MB model needs no threads, and GitHub Pages cannot send COOP/COEP headers
 
+// Weights live on Hugging Face for the published page; the dev server serves public/models/. ?models=<url> overrides.
+const HF_BASE = "https://huggingface.co/ai-ecoverse/cua-s1.js/resolve/main";
+const MODEL_BASE = new URLSearchParams(location.search).get("models") ?? (import.meta.env.VITE_MODEL_BASE as string | undefined) ?? (import.meta.env.DEV ? "models" : HF_BASE);
+
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const form = $<HTMLFormElement>("target");
 const doc = $<HTMLTextAreaElement>("doc");
@@ -135,6 +139,6 @@ $<HTMLInputElement>("pdf").onchange = async (e) => {
 };
 
 const t0 = performance.now();
-model = await loadCuaS1(new URL("models/cua-s1-forms", location.href).href, { ort: ort as unknown as OrtModule });
+model = await loadCuaS1(new URL(`${MODEL_BASE.replace(/\/$/, "")}/cua-s1-forms`, location.href).href, { ort: ort as unknown as OrtModule });
 status(`cua-s1-forms loaded in ${Math.round(performance.now() - t0)} ms · ${model.manifest.source.split("@")[0]}@${model.manifest.source.split("@")[1].slice(0, 7)} · WASM`);
 $<HTMLButtonElement>("plan").disabled = false;

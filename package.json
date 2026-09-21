@@ -41,5 +41,24 @@
     "tsx": "4.23.15",
     "typescript": "7.0.2",
     "vite": "8.3.0"
+  },
+  "keywords": [
+    "cua",
+    "cua-s1",
+    "computer-use",
+    "form-filling",
+    "system-one",
+    "jev",
+    "onnxruntime",
+    "browser"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ai-ecoverse/cua-s1.js.git"
+  },
+  "homepage": "https://ai-ecoverse.github.io/cua-s1.js/",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }

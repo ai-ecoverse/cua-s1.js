@@ -9,5 +9,5 @@ export default defineConfig({
   server: { host: "127.0.0.1", port: 5174, allowedHosts: [".getbb.app"] },
   preview: { host: "127.0.0.1", port: 4174 },
   optimizeDeps: { exclude: ["onnxruntime-web"] },
-  build: { outDir: fileURLToPath(new URL("../dist-demo", import.meta.url)), target: "es2023", emptyOutDir: true },
+  build: { outDir: fileURLToPath(new URL("../dist-demo", import.meta.url)), target: "es2023", emptyOutDir: true, copyPublicDir: false },   // production loads the weights from Hugging Face
 });

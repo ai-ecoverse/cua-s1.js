@@ -61,8 +61,12 @@ def main():
     rows = [r for seed in range(a.episodes) for r in episode_rows(10_000 + seed)]
     sample = collate(collator, rows[:8])
 
-    os.makedirs(a.out, exist_ok=True)
-    onnx_path = os.path.join(a.out, "model.onnx")
+    # everything but the manifest lives under r-<commit>/: republishing never overwrites a file an older manifest
+    # names, and the switch to a new checkpoint is the single commit that replaces manifest.json
+    rdir = f"r-{rev[:7]}"
+    if os.path.isdir(a.out): shutil.rmtree(a.out)
+    os.makedirs(os.path.join(a.out, rdir))
+    onnx_path = os.path.join(a.out, rdir, "model.onnx")
     # torch.export-based exporter: the legacy tracer bakes the sample's sequence length into nn.MultiheadAttention's
     # reshapes. Grad enabled + parameters requiring grad keeps nn.TransformerEncoderLayer off its fused inference
     # fast path (torch._transformer_encoder_layer_fwd); eval() still disables dropout.
@@ -98,9 +102,10 @@ def main():
     print(json.dumps(parity))
 
     sha = hashlib.sha256(open(onnx_path, "rb").read()).hexdigest()
-    shutil.copy(sidecar, os.path.join(a.out, "checkpoint.json"))    # upstream config, signature and metadata
+    shutil.copy(sidecar, os.path.join(a.out, rdir, "checkpoint.json"))    # upstream config, signature and metadata
     manifest = {
-        "name": a.name, "source": f"{a.repo}@{rev}", "model": "model.onnx", "sha256": sha, "bytes": os.path.getsize(onnx_path),
+        "name": a.name, "source": f"{a.repo}@{rev}", "model": f"{rdir}/model.onnx", "checkpoint": f"{rdir}/checkpoint.json",
+        "sha256": sha, "bytes": os.path.getsize(onnx_path),
         "context_tokens": config["context_tokens"], "option_tokens": config["option_tokens"],
         "inputs": INPUTS, "outputs": ["logits", "probabilities"], "opset": a.opset, "parity": parity,
     }

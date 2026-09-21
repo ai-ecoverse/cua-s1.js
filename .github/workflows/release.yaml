@@ -1,0 +1,26 @@
+name: Publish
+
+# Publishes @ai-ecoverse/cua-s1.js on a v* tag with npm trusted publishing (OIDC): no NPM_TOKEN secret.
+# The trusted publisher on npmjs.com must name this repository and this file (release.yaml).
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version: 22, cache: npm, registry-url: https://registry.npmjs.org }
+      - run: npm ci
+      - run: npm install -g npm@latest        # trusted publishing needs npm >= 11.5.1
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build:lib
+      - run: npm publish

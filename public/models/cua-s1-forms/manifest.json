@@ -1,7 +1,8 @@
 {
   "name": "cua-s1-forms",
   "source": "cua-ai/cua-s1-forms@f54adbf447f4ca6ec259f529ee3f2e3e09f8cc71",
-  "model": "model.onnx",
+  "model": "r-f54adbf/model.onnx",
+  "checkpoint": "r-f54adbf/checkpoint.json",
   "sha256": "beec57a720f5e5769a65b6a1fad5aed9b71b180992143bbc2aa8abb7939346da",
   "bytes": 3270426,
   "context_tokens": 224,

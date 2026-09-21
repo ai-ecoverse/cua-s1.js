@@ -1,0 +1,18 @@
+name: CI
+
+on:
+  push: { branches: [main] }
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5          # vendor/cua (the upstream submodule) is only needed to re-export
+      - uses: actions/setup-node@v5
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build:lib
+      # schema, collation and extraction parity against Python's output, and the ONNX graph against PyTorch
+      - run: npm test

@@ -9,11 +9,15 @@ The model, its training data and the planning rules are Cua's
 ([trycua/cua `libs/cua-s1`](https://github.com/trycua/cua/tree/main/libs/cua-s1), MIT). This package runs their
 unmodified checkpoint and ports the code around it.
 
+**[Live demo](https://ai-ecoverse.github.io/cua-s1.js/)** · **[Weights](https://huggingface.co/ai-ecoverse/cua-s1.js)** · `npm install @ai-ecoverse/cua-s1.js onnxruntime-web`
+
+![cua-s1.js demo](docs/demo.png)
+
 ```ts
 import * as ort from "onnxruntime-web/wasm";
 import { loadCuaS1, extractEntities } from "@ai-ecoverse/cua-s1.js";
 
-const model = await loadCuaS1("/models/cua-s1-forms", { ort });
+const model = await loadCuaS1("https://huggingface.co/ai-ecoverse/cua-s1.js/resolve/main/cua-s1-forms", { ort });
 const plan = await model.plan(
   "Northwind Clinic - New Patient Registration",
   [
@@ -28,7 +32,9 @@ plan.decisions;   // one per element: action, entityIndex, probability, distribu
 plan.actions;     // what to execute, in order: fills, checkboxes, then at most one submit click
 ```
 
-Nothing is executed by the library: `plan()` returns decisions, and the caller applies them.
+Nothing is executed by the library: `plan()` returns decisions, and the caller applies them. The loader checks the
+graph's SHA-256 against the manifest. Run the model in a Web Worker if the page can plan while hidden: Chrome
+throttles a background tab's main thread, and the same 150 ms plan took 5–17 s there.
 
 ## How It Works
 
@@ -56,7 +62,8 @@ On the demo's clinic form (15 elements, a document with 15 `Label: value` pairs 
 `Tel` / `Work phone` / `Emergency contact phone`), all 11 fields were filled with the right values. Consent was
 ticked and the newsletter box left alone. The submit click only runs with `allowSubmit`.
 
-- **Latency:** 168 ms per plan on one WASM thread in Chrome on an M4 Max. The model loads in about 240 ms.
+- **Latency:** 150–170 ms per plan on one WASM thread in a visible Chrome tab on an M4 Max. The model loads in
+  about 240 ms.
 - **Where the time goes:** every element carries the same options, and the unmodified graph re-encodes them for
   every element (285 option passes here). Encoding the options once per plan would be a 10×+ speedup, but needs a
   graph that differs from upstream's.
@@ -76,7 +83,12 @@ cd .. && npm install && npm test && npm run dev     # http://127.0.0.1:5174
 ```
 
 `vendor/cua` is a sparse submodule of trycua/cua (`libs/cua-s1` only), so the export and the fixtures always run
-Cua's own code.
+Cua's own code. `export.py` pins the Hugging Face checkpoint to a commit and writes the bundle under `r-<commit>/`
+with a `manifest.json`. `HF_TOKEN=... uv run python upload_hf.py` publishes it to `ai-ecoverse/cua-s1.js`, committing
+the revision's files first and the manifest last, so switching to a new checkpoint is a single commit.
+
+Releases publish to npm from CI (`.github/workflows/release.yaml`, trusted publishing) when a `v*` tag is pushed.
+The demo deploys to GitHub Pages on every push to `main` and loads the weights from Hugging Face.
 
 ## License
 
