@@ -1,26 +1,39 @@
 name: Publish
 
-# Publishes @ai-ecoverse/cua-s1.js on a v* tag with npm trusted publishing (OIDC): no NPM_TOKEN secret.
-# The trusted publisher on npmjs.com must name this repository and this file (release.yaml).
+# semantic-release on main: version bump, changelog, npm (OIDC trusted publishing, no NPM_TOKEN), GitHub release.
+# The workflow filename must stay release.yaml: npm's trusted publisher matches it exactly.
+# Do not set setup-node registry-url: it writes an .npmrc that breaks semantic-release's OIDC auth.
 on:
   push:
-    tags: ["v*"]
+    branches: [main]
   workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
-  publish:
+  release:
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
     steps:
       - uses: actions/checkout@v5
+        with: { fetch-depth: 0 }
       - uses: actions/setup-node@v5
-        with: { node-version: 22, cache: npm, registry-url: https://registry.npmjs.org }
+        with: { node-version: 22, cache: npm }
       - run: npm ci
       - run: npm install -g npm@latest        # trusted publishing needs npm >= 11.5.1
       - run: npm run typecheck
-      - run: npm test
       - run: npm run build:lib
-      - run: npm publish
+      - run: npm test
+      - run: npx semantic-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

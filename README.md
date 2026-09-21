@@ -88,8 +88,11 @@ Cua's own code. `export.py` pins the Hugging Face checkpoint to a commit and wri
 with a `manifest.json`. `HF_TOKEN=... uv run python upload_hf.py` publishes it to `ai-ecoverse/cua-s1.js`, committing
 the revision's files first and the manifest last, so switching to a new checkpoint is a single commit.
 
-Releases publish to npm from CI (`.github/workflows/release.yaml`, trusted publishing) when a `v*` tag is pushed.
-The demo deploys to GitHub Pages on every push to `main` and loads the weights from Hugging Face.
+Releases publish to npm from CI (`.github/workflows/release.yaml`, trusted publishing, OIDC) via
+[semantic-release](https://semantic-release.org/) on every push to `main`. Commits that follow
+[Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `BREAKING CHANGE:`) cut the next
+patch / minor / major; `v0.1.1` is the last hand-tagged release. The demo deploys to GitHub Pages on every push to
+`main` and loads the weights from Hugging Face.
 
 ## License
 
