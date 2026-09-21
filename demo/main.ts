@@ -122,7 +122,7 @@ $<HTMLInputElement>("pdf").onchange = async (e) => {
   if (!file) return;
   const pdfjs = await import("pdfjs-dist");
   pdfjs.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.min.mjs", import.meta.url).href;
-  const pdf = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+  const pdf = await pdfjs.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;   // pdf.js >= 6.2.108: GHSA-hq66-cqwq-w95j
   const lines: string[] = [];
   for (let i = 1; i <= Math.min(pdf.numPages, 20); i++) {
     const content = await (await pdf.getPage(i)).getTextContent();
