@@ -65,8 +65,9 @@ ticked and the newsletter box left alone. The submit click only runs with `allow
 - **Latency:** 150–170 ms per plan on one WASM thread in a visible Chrome tab on an M4 Max. The model loads in
   about 240 ms.
 - **Where the time goes:** every element carries the same options, and the unmodified graph re-encodes them for
-  every element (285 option passes here). Encoding the options once per plan would be a 10×+ speedup, but needs a
-  graph that differs from upstream's.
+  every element (285 option passes here instead of 19). By padded token count the option encoder is about 78% of the
+  work, so encoding the options once per plan should make a plan roughly 3–4× faster. That needs a graph that differs
+  from upstream's ([#3](https://github.com/ai-ecoverse/cua-s1.js/issues/3)).
 
 On the synthetic episodes, the PyTorch model itself picks the labelled option 98.7% of the time (1,034 of 1,048).
 The model card reports 99.95% on its own form-disjoint test split. The misses are mostly conservative:
