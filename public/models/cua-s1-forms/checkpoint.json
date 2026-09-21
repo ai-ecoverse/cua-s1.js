@@ -1,0 +1,44 @@
+{
+  "config": {
+    "context_tokens": 224,
+    "encoder": "tinyx",
+    "heads": 4,
+    "hf_model": "Qwen/Qwen2.5-0.5B",
+    "layers": 2,
+    "option_tokens": 96,
+    "rank": 128,
+    "width": 128
+  },
+  "format": "cua-s1",
+  "format_version": 1,
+  "metadata": {
+    "best_validation": {
+      "ece": 0.00014795374386267213,
+      "examples": 22054,
+      "nll": 0.0019850827802381913,
+      "per_action": {
+        "check": {
+          "acc": 1.0,
+          "n": 835
+        },
+        "click": {
+          "acc": 1.0,
+          "n": 939
+        },
+        "fill": {
+          "acc": 0.9998858968507531,
+          "n": 8764
+        },
+        "skip": {
+          "acc": 0.9989579715178881,
+          "n": 11516
+        }
+      },
+      "rows_per_second": 2589.071654630599,
+      "top1": 0.9994105100631714
+    },
+    "converted_by": "scripts/convert_to_safetensors.py",
+    "source_checkpoint": "jevform-best.pt"
+  },
+  "state_signature": "0c661c669bc22189c81637553dcd105fe6178c8a8de85f6f6307c3c635403bfa"
+}

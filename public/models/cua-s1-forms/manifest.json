@@ -1,0 +1,27 @@
+{
+  "name": "cua-s1-forms",
+  "source": "cua-ai/cua-s1-forms@f54adbf447f4ca6ec259f529ee3f2e3e09f8cc71",
+  "model": "model.onnx",
+  "sha256": "beec57a720f5e5769a65b6a1fad5aed9b71b180992143bbc2aa8abb7939346da",
+  "bytes": 3270426,
+  "context_tokens": 224,
+  "option_tokens": 96,
+  "inputs": [
+    "context_ids",
+    "context_mask",
+    "option_ids",
+    "option_token_mask",
+    "option_mask"
+  ],
+  "outputs": [
+    "logits",
+    "probabilities"
+  ],
+  "opset": 18,
+  "parity": {
+    "decisions": 1048,
+    "max_abs_dp": 3.1888484954833984e-06,
+    "argmax_flips": 0,
+    "top1_vs_labels": 0.9866412213740458
+  }
+}

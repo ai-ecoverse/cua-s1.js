@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>cua-s1.js — form filling decisions in the browser</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>▦</text></svg>" />
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <header>
+    <h1>cua-s1.js <span>form filling decisions in the browser</span></h1>
+    <p class="sub">
+      <a href="https://huggingface.co/cua-ai/cua-s1-forms">cua-s1-forms</a> reads a form field and a document and decides:
+      fill it with one of the document's values, tick it, click it, or leave it alone. 706k parameters, 3 MB, one
+      forward pass for the whole form, on your CPU. Nothing is typed until you press Apply.
+    </p>
+    <p id="status" class="muted">Loading the model…</p>
+  </header>
+
+  <main>
+    <section class="panel">
+      <h2>1 · The document</h2>
+      <p class="muted">Paste text with <code>Label: value</code> lines, or load a PDF. Only these values can ever be filled.</p>
+      <textarea id="doc" spellcheck="false"></textarea>
+      <div class="row">
+        <label class="file">Load PDF <input id="pdf" type="file" accept="application/pdf" /></label>
+        <span id="entities" class="muted"></span>
+      </div>
+    </section>
+
+    <section class="panel" id="form-panel">
+      <h2>2 · The form</h2>
+      <form id="target" aria-label="Northwind Clinic - New Patient Registration">
+        <h3>Northwind Clinic — New Patient Registration</h3>
+        <label>First name <input name="first" /></label>
+        <label>Last name <input name="last" /></label>
+        <label>Date of birth <input name="dob" placeholder="MM/DD/YYYY" /></label>
+        <label>Phone number <input name="phone" type="tel" /></label>
+        <label>Email address <input name="email" type="email" /></label>
+        <label>Street address <input name="street" /></label>
+        <label>City <input name="city" /></label>
+        <label>ZIP code <input name="zip" /></label>
+        <label>Emergency contact phone <input name="emergency" type="tel" /></label>
+        <label>Insurance member ID <input name="insurance" /></label>
+        <label>Known allergies <textarea name="allergies" rows="2"></textarea></label>
+        <label class="check"><input type="checkbox" name="consent" /> I consent to treatment</label>
+        <label class="check"><input type="checkbox" name="newsletter" /> Send me the newsletter</label>
+        <div class="buttons"><button type="button">Save draft</button><button type="submit">Submit</button></div>
+      </form>
+    </section>
+
+    <section class="panel" id="plan-panel">
+      <h2>3 · The plan</h2>
+      <div class="row">
+        <button id="plan" disabled>Plan</button>
+        <button id="apply" disabled>Apply</button>
+        <label>min confidence <input id="min" type="number" min="0" max="1" step="0.05" value="0.5" /></label>
+        <label class="check"><input id="submit" type="checkbox" /> allow submit</label>
+        <button id="reset" type="button">Reset form</button>
+      </div>
+      <p id="plan-meta" class="muted"></p>
+      <table id="decisions"><thead><tr><th>Element</th><th>Decision</th><th>p</th></tr></thead><tbody></tbody></table>
+    </section>
+  </main>
+
+  <footer>
+    <p>
+      The model, its training data and the planning rules are <a href="https://github.com/trycua/cua/tree/main/libs/cua-s1">Cua's cua-s1</a>
+      (MIT). This page runs their unmodified checkpoint, exported to ONNX, in
+      <a href="https://onnxruntime.ai/docs/tutorials/web/">onnxruntime-web</a>; PDF text comes from
+      <a href="https://mozilla.github.io/pdf.js/">pdf.js</a>. cua-s1 is a research checkpoint trained on synthetic forms —
+      check the plan before applying it.
+    </p>
+    <p class="muted">An <a href="https://github.com/ai-ecoverse">AI Ecoverse</a> project · sibling of <a href="https://github.com/ai-ecoverse/kev.js">kev.js</a> and <a href="https://www.sliccy.com">SLICC</a>.</p>
+  </footer>
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>

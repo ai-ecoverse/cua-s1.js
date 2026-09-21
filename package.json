@@ -1,0 +1,45 @@
+{
+  "name": "@ai-ecoverse/cua-s1.js",
+  "version": "0.1.0",
+  "description": "cua-s1 form-filling decision models in the browser via onnxruntime-web",
+  "type": "module",
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build:lib": "tsc -p tsconfig.lib.json",
+    "prepack": "npm run build:lib",
+    "dev": "vite demo",
+    "build:demo": "vite build demo",
+    "typecheck": "tsc --noEmit -p .",
+    "test": "node --import tsx --test test/*.test.ts"
+  },
+  "peerDependencies": {
+    "onnxruntime-common": ">=1.30.0"
+  },
+  "engines": {
+    "node": ">=20.9"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.2",
+    "onnxruntime-common": "1.30.0",
+    "onnxruntime-node": "1.30.0",
+    "onnxruntime-web": "1.30.0",
+    "pdfjs-dist": "5.7.284",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2",
+    "vite": "8.3.0"
+  }
+}

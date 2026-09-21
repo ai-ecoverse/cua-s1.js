@@ -1,0 +1,18 @@
+[project]
+name = "cua-s1-js-export"
+version = "0.1.0"
+description = "Export cua-s1 checkpoints to ONNX for the browser runtime and generate PyTorch parity fixtures"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "cua-s1",                 # the vendored upstream package: model, checkpoint loader, schema, synthetic data
+    "onnx>=1.19",
+    "onnxruntime>=1.23",
+    "onnxscript",
+    "huggingface_hub",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+cua-s1 = { path = "../vendor/cua/libs/cua-s1/python", editable = true }
