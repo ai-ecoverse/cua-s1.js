@@ -140,5 +140,5 @@ $<HTMLInputElement>("pdf").onchange = async (e) => {
 
 const t0 = performance.now();
 model = await loadCuaS1(new URL(`${MODEL_BASE.replace(/\/$/, "")}/cua-s1-forms`, location.href).href, { ort: ort as unknown as OrtModule });
-status(`cua-s1-forms loaded in ${Math.round(performance.now() - t0)} ms · ${model.manifest.source.split("@")[0]}@${model.manifest.source.split("@")[1].slice(0, 7)} · WASM`);
+status(`cua-s1-forms loaded in ${Math.round(performance.now() - t0)} ms · ${model.manifest.source.split("@")[0]}@${model.manifest.source.split("@")[1].slice(0, 7)} · WASM${model.sharedOptions ? ", options encoded once per plan" : ""}`);
 $<HTMLButtonElement>("plan").disabled = false;
