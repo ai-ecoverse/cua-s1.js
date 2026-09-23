@@ -33,8 +33,7 @@ plan.actions;     // what to execute, in order: fills, checkboxes, then at most 
 ```
 
 Nothing is executed by the library: `plan()` returns decisions, and the caller applies them. The loader checks the
-graph's SHA-256 against the manifest. Run the model in a Web Worker if the page can plan while hidden: Chrome
-throttles a background tab's main thread, and the same 150 ms plan took 5–17 s there.
+graph's SHA-256 against the manifest.
 
 ## How It Works
 
