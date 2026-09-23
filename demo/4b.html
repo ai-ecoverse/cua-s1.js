@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>cua-s1.js — cua-s1-4b in the browser</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>▦</text></svg>" />
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <header>
+    <h1>cua-s1.js <span>cua-s1-4b in the browser</span></h1>
+    <p class="sub">
+      <a href="https://huggingface.co/cua-ai/cua-s1-4b-0.1">cua-s1-4b-0.1</a> is a LoRA on Qwen3.5-4B. It is shown one
+      screen as an accessibility tree and a closed list of (element, action) options, one letter each, and picks the
+      single best next action in one forward pass, on WebGPU. The screens below come from Cua's own task generator
+      (cua-bench-s1); ✓ marks the options its answer key accepts. The first visit downloads 4.7 GB.
+    </p>
+    <nav>
+      <a href="./">cua-s1-forms demo</a>
+      <a href="https://github.com/ai-ecoverse/cua-s1.js">GitHub</a>
+      <a href="https://www.npmjs.com/package/@ai-ecoverse/cua-s1.js">npm</a>
+      <a href="https://huggingface.co/ai-ecoverse/cua-s1.js">Weights</a>
+      <a href="https://ai-ecoverse.github.io/kev.js/">kev.js</a>
+      <a href="https://github.com/ai-ecoverse">AI Ecoverse</a>
+    </nav>
+    <p id="status" class="muted">Loading the model…</p>
+  </header>
+
+  <main class="two">
+    <section class="panel">
+      <h2>1 · The screen</h2>
+      <div class="row"><select id="task"></select><span id="task-meta" class="muted"></span></div>
+      <textarea id="tree" spellcheck="false"></textarea>
+    </section>
+    <section class="panel">
+      <h2>2 · The decision</h2>
+      <div class="row"><button id="score" disabled>Score</button><span id="score-meta" class="muted"></span></div>
+      <table id="options"><thead><tr><th></th><th>Option</th><th>Gold</th><th>p</th><th></th></tr></thead><tbody></tbody></table>
+    </section>
+  </main>
+
+  <footer>
+    <p>
+      The adapter, its prompt format and the task generator are <a href="https://github.com/trycua/cua/tree/main/libs/cua-s1">Cua's</a>;
+      the base model is <a href="https://huggingface.co/Qwen/Qwen3.5-4B">Qwen3.5-4B</a> (Apache-2.0). The text adapter is
+      merged in fp32 and exported to ONNX with int8 weights. cua-s1-4b is a research checkpoint: read the
+      <a href="https://github.com/trycua/cua/blob/main/libs/cua-s1/MODEL_CARD.md">model card</a> before relying on it.
+    </p>
+  </footer>
+  <script type="module" src="./four-b.ts"></script>
+</body>
+</html>
