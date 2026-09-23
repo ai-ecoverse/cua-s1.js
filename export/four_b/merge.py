@@ -1,6 +1,9 @@
-"""Fold cua-s1-4b's text LoRA into Qwen/Qwen3.5-4B in fp32 and write a checkpoint the onnxruntime-genai builder reads.
+"""Fold a cua-s1-4b LoRA into Qwen/Qwen3.5-4B in fp32 and write a checkpoint the onnxruntime-genai builder reads.
 
-    uv run python -m four_b.merge --adapter cua-ai/cua-s1-4b-0.1 --out build/cua-s1-4b-0.1
+    uv run python -m four_b.merge --adapter cua-ai/cua-s1-4b-0.1 [--modality multimodal] --out build/cua-s1-4b-0.1
+
+The text and multimodal adapters are trained independently: the multimodal one also adapts the vision tower's MLPs
+and its merger (linear_fc1/linear_fc2), so its export takes the vision weights from this merged checkpoint too.
 
 W' = W + (alpha / r) * B @ A for every adapted module, in fp32, which is what peft's merge_and_unload computes. The
 builder expects the full Qwen3_5ForConditionalGeneration layout (model.language_model.*, model.visual.*, mtp.*), so
@@ -21,7 +24,7 @@ LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"   # cua_s1.four_b.LETTERS
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--adapter", default="cua-ai/cua-s1-4b-0.1")
-    ap.add_argument("--modality", default="text", choices=["text"], help="the multimodal adapter needs the vision tower")
+    ap.add_argument("--modality", default="text", choices=["text", "multimodal"])
     ap.add_argument("--out", required=True)
     a = ap.parse_args()
     run = pin(a.adapter)
@@ -42,15 +45,18 @@ def main():
         if 2 * len(names) != len(list(f.keys())):
             raise SystemExit("adapter holds tensors other than lora_A/lora_B pairs")
         for n in names:
-            # base_model.model.model.layers.N.<module> (Qwen3_5ForCausalLM) -> model.language_model.layers.N.<module>
+            # text (Qwen3_5ForCausalLM): base_model.model.model.layers.N.<m> -> model.language_model.layers.N.<m>
+            # multimodal (Qwen3_5ForConditionalGeneration): base_model.model.model.{language_model,visual}.<m> -> as is
             if not n.startswith("base_model.model.model."): raise SystemExit(f"unexpected adapter key {n}")
-            key = "model.language_model." + n[len("base_model.model.model."):] + ".weight"
+            key = n[len("base_model.model."):] + ".weight"
+            if key.startswith("model.layers."): key = "model.language_model." + key[len("model."):]
             if key not in sd: raise SystemExit(f"{n}: no {key} in the base checkpoint")
             A, B = f.get_tensor(f"{n}.lora_A.weight").float(), f.get_tensor(f"{n}.lora_B.weight").float()
             sd[key] = (sd[key].float() + scale * (B @ A)).contiguous()
-    lm = [k for k in sd if k.startswith("model.language_model.")]
-    for k in lm: sd[k] = sd[k].float().contiguous()             # the language model in fp32; vision and mtp untouched
-    print(f"merged {len(names)} LoRA modules (alpha/r = {scale:g}); {len(lm)} language-model tensors in fp32")
+    lm = [k for k in sd if k.startswith(("model.language_model.", "model.visual."))]
+    for k in lm: sd[k] = sd[k].float().contiguous()             # language model and vision tower in fp32; mtp untouched
+    print(f"merged {len(names)} LoRA modules (alpha/r = {scale:g}, {sum('.visual.' in n for n in names)} in the vision tower); "
+          f"{len(lm)} language-model and vision tensors in fp32")
 
     ckpt = os.path.join(a.out, "merged")
     os.makedirs(ckpt, exist_ok=True)

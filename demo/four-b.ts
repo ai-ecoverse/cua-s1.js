@@ -3,7 +3,10 @@ import wasm from "onnxruntime-web/ort-wasm-simd-threaded.asyncify.wasm?url";
 import mjs from "onnxruntime-web/ort-wasm-simd-threaded.asyncify.mjs?url";
 import { loadCuaS1FourB, type CuaS1FourB, type FourBOption } from "../src/four-b.ts";
 import type { OrtModule } from "../src/model.ts";
-import fixtures from "../fixtures/cua-s1-4b-0.1.json";
+import textFixtures from "../fixtures/cua-s1-4b-0.1.json";
+import mmFixtures from "../fixtures/cua-s1-4b-0.1-multimodal.json";
+
+const shots = import.meta.glob("../fixtures/cua-s1-4b-0.1-multimodal/*.png", { query: "?url", import: "default", eager: true }) as Record<string, string>;
 
 ort.env.wasm.wasmPaths = { wasm, mjs };
 ort.env.wasm.numThreads = self.crossOriginIsolated ? Math.min(8, navigator.hardwareConcurrency || 4) : 1;
@@ -12,13 +15,28 @@ ort.env.wasm.numThreads = self.crossOriginIsolated ? Math.min(8, navigator.hardw
 const HF_BASE = "https://huggingface.co/ai-ecoverse/cua-s1.js/resolve/main";
 const MODEL_BASE = new URLSearchParams(location.search).get("models") ?? (import.meta.env.VITE_MODEL_BASE as string | undefined) ?? (import.meta.env.DEV ? "models" : HF_BASE);
 
-interface Task { id: string; family: string; app: string; ax_tree: string; gold: string[]; options: { element_id: string; role: string; label: string; action: string; entity_id: string | null }[] }
-const tasks = (fixtures as { fixtures: Task[] }).fixtures;
+interface Task { id: string; family: string; app: string; ax_tree: string | null; screenshot?: string; gold: string[]; options: { element_id: string; role: string; label: string; action: string; entity_id: string | null }[] }
+const modality = new URLSearchParams(location.search).get("modality") === "multimodal" ? "multimodal" : "text";
+const bundle = modality === "multimodal" ? "cua-s1-4b-0.1-multimodal" : "cua-s1-4b-0.1";
+const tasks = ((modality === "multimodal" ? mmFixtures : textFixtures) as { fixtures: Task[] }).fixtures;
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const status = (s: string) => { $("status").textContent = s; };
-const select = $<HTMLSelectElement>("task"), tree = $<HTMLTextAreaElement>("tree"), tbody = $("options").querySelector("tbody")!;
+const select = $<HTMLSelectElement>("task"), tree = $<HTMLTextAreaElement>("tree"), shot = $<HTMLImageElement>("shot"), tbody = $("options").querySelector("tbody")!;
 let model: CuaS1FourB | null = null;
+$(`mode-${modality}`).classList.add("current");
+tree.hidden = modality === "multimodal"; shot.hidden = modality === "text";
+for (const a of document.querySelectorAll<HTMLAnchorElement>("#mode-text, #mode-multimodal")) {   // keep ?models= when switching
+  const u = new URL(location.href); u.searchParams.set("modality", a.id.slice(5)); a.href = u.search;
+}
+
+/** RGBA pixels of the task's screenshot, as the model reads them. */
+async function pixels(t: Task) {
+  const bmp = await createImageBitmap(await (await fetch(shots[`../fixtures/${t.screenshot}`])).blob());
+  const c = new OffscreenCanvas(bmp.width, bmp.height), g = c.getContext("2d")!;
+  g.drawImage(bmp, 0, 0);
+  return g.getImageData(0, 0, bmp.width, bmp.height);
+}
 
 tasks.forEach((t, i) => select.append(new Option(`${t.family} · ${t.app} · ${t.id.split("-").slice(-1)[0]}`, String(i))));
 const task = () => tasks[Number(select.value)];
@@ -42,7 +60,8 @@ function show(probs?: number[]) {
 
 function pick() {
   const t = task();
-  tree.value = t.ax_tree;
+  if (t.screenshot) shot.src = shots[`../fixtures/${t.screenshot}`];
+  else tree.value = t.ax_tree ?? "";
   $("task-meta").textContent = `${t.options.length} options, ${t.gold.length} accepted`;
   $("score-meta").textContent = "";
   show();
@@ -55,7 +74,9 @@ async function score() {
   const t = task();
   $<HTMLButtonElement>("score").disabled = true;
   try {
-    const r = await model.score(options(t), { app: t.app, taskFamily: t.family, axTree: tree.value });
+    const r = await model.score(options(t), modality === "multimodal"
+      ? { app: t.app, taskFamily: t.family, screenshot: await pixels(t) }
+      : { app: t.app, taskFamily: t.family, axTree: tree.value });
     show(r.options.map((o) => o.probability));
     $("score-meta").textContent = `${r.tokens} tokens in ${r.latencyMs.toFixed(0)} ms · picked ${r.best.letter}${t.gold.includes(r.best.letter) ? " ✓" : " (not in the answer key)"}`;
   } finally { $<HTMLButtonElement>("score").disabled = false; }
@@ -65,7 +86,7 @@ $("score").onclick = () => void score();
 const hasGpu = "gpu" in navigator && !!(await (navigator as Navigator & { gpu: { requestAdapter(): Promise<unknown> } }).gpu.requestAdapter().catch(() => null));
 const t0 = performance.now();
 const got = new Map<string, [number, number]>();
-model = await loadCuaS1FourB(new URL(`${MODEL_BASE.replace(/\/$/, "")}/cua-s1-4b-0.1`, location.href).href, {
+model = await loadCuaS1FourB(new URL(`${MODEL_BASE.replace(/\/$/, "")}/${bundle}`, location.href).href, {
   ort: ort as unknown as OrtModule,
   executionProviders: hasGpu ? ["webgpu"] : ["wasm"],
   onProgress: (p) => {
@@ -74,6 +95,6 @@ model = await loadCuaS1FourB(new URL(`${MODEL_BASE.replace(/\/$/, "")}/cua-s1-4b
     status(`Downloading ${(a / 1e9).toFixed(2)} of ${(b / 1e9).toFixed(2)} GB…`);
   },
 });
-status(`cua-s1-4b-0.1 loaded in ${((performance.now() - t0) / 1000).toFixed(1)} s · ${model.manifest.run.split("@")[0]}@${model.manifest.run.split("@")[1].slice(0, 7)} · ${model.variant} · ${hasGpu ? "WebGPU" : "WASM (no WebGPU: slow)"}`);
+status(`${bundle} loaded in ${((performance.now() - t0) / 1000).toFixed(1)} s · ${model.manifest.run.split("@")[0]}@${model.manifest.run.split("@")[1].slice(0, 7)} · ${model.variant} · ${hasGpu ? "WebGPU" : "WASM (no WebGPU: slow)"}`);
 $<HTMLButtonElement>("score").disabled = false;
 await score();

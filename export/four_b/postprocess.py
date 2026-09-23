@@ -5,7 +5,10 @@ kev_web_export/postprocess.py: the same Qwen3.5 builder output).
   (GatherBlockQuantized). --embed int8 stores it as int8 with one scale per row, dequantized after the lookup with
   standard ops (Gather, Cast, Mul), so every execution provider can run it.
 - The rotary cos/sin caches are sized for the base model's 262k context. A cua-s1-4b prompt is an accessibility
-  tree and at most 26 options, a few thousand tokens, so --rope-positions trims them."""
+  tree and at most 26 options, a few thousand tokens, so --rope-positions trims them.
+- --image-token-id adds an `image_embeds` input [images' merged patches, hidden] for the multimodal adapter: each
+  <|image_pad|> position of input_ids takes the next row, in order, instead of the token's embedding. That is
+  transformers' masked_scatter of the vision features into inputs_embeds. Without an image, pass one row of zeros."""
 import argparse, os, shutil
 import numpy as np
 import onnx
@@ -18,6 +21,7 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--embed", choices=["keep", "int8"], default="int8")
     ap.add_argument("--rope-positions", type=int, default=8192)
+    ap.add_argument("--image-token-id", type=int, help="splice image_embeds in at this token id (multimodal)")
     ap.add_argument("--shard-mb", type=int, default=32,
                     help="max size of one external-data file. Small shards keep every request well inside proxy and "
                          "CDN response caps (bb connect cuts a response at 34.5 MiB) and make a failed download cheap "
@@ -26,6 +30,9 @@ def main():
     m = onnx.load(f"{a.src}/model.onnx", load_external_data=True)
     g = m.graph
     inits = {t.name: t for t in g.initializer}
+    (embed,) = [n for n in g.node if n.op_type == "Gather" and n.input[0] == "model.embed_tokens.weight"]
+    embedded = embed.output[0]   # the embedding lookup's output, whatever computes it below
+    hidden = inits["model.embed_tokens.weight"].dims[1]
 
     for name in ("cos_cache", "sin_cache"):
         t = inits[name]; arr = numpy_helper.to_array(t)
@@ -68,6 +75,10 @@ def main():
         for k, n in enumerate(new_nodes): g.node.insert(i + k, n)
         print(f"embedding -> int8 per-row in {len(cast_outputs)} column slices (max abs error {err:.2e})")
 
+    if a.image_token_id is not None:
+        splice_image_embeds(g, embedded, a.image_token_id, hidden)
+        print(f"image_embeds spliced in at token {a.image_token_id}")
+
     os.makedirs(a.out, exist_ok=True)
     for f in os.listdir(a.src):
         if f.endswith((".json", ".jinja")): shutil.copy(f"{a.src}/{f}", a.out)
@@ -75,6 +86,33 @@ def main():
         if f.startswith("model.onnx.data"): os.remove(f"{a.out}/{f}")
     files = save_sharded(m, a.out, a.shard_mb * 1_000_000)
     print(f"{a.out}: " + ", ".join(f"{f} {os.path.getsize(f'{a.out}/{f}') / 1e6:.0f} MB" for f in files))
+
+
+def splice_image_embeds(g, embedded, token_id, hidden):
+    (producer,) = [n for n in g.node if embedded in n.output]
+    text = f"{embedded}_text"
+    producer.output[list(producer.output).index(embedded)] = text
+    ids = next(i for i in g.input if i.name == "input_ids")
+    io = next(o for o in g.output if o.name == "hidden_states").type.tensor_type.elem_type
+    g.input.append(helper.make_tensor_value_info("image_embeds", io, ["image_tokens", hidden]))
+    p = "/model/image_embeds"
+    g.initializer.extend([numpy_helper.from_array(np.array(token_id, np.int64), f"{p}/token_id"),
+                          numpy_helper.from_array(np.array(1, np.int64), f"{p}/one"),
+                          numpy_helper.from_array(np.array(0, np.int64), f"{p}/zero"),
+                          numpy_helper.from_array(np.array(1, np.int64), f"{p}/axis"),
+                          numpy_helper.from_array(np.array([-1], np.int64), f"{p}/last")])
+    nodes = [
+        helper.make_node("Equal", [ids.name, f"{p}/token_id"], [f"{p}/mask"], name=f"{p}/Equal"),                  # [B, S]
+        helper.make_node("Cast", [f"{p}/mask"], [f"{p}/mask_i"], name=f"{p}/Cast", to=TensorProto.INT64),
+        helper.make_node("CumSum", [f"{p}/mask_i", f"{p}/axis"], [f"{p}/count"], name=f"{p}/CumSum"),               # 1, 2, ... at image tokens
+        helper.make_node("Sub", [f"{p}/count", f"{p}/one"], [f"{p}/row"], name=f"{p}/Sub"),
+        helper.make_node("Max", [f"{p}/row", f"{p}/zero"], [f"{p}/row0"], name=f"{p}/Max"),                         # text tokens before the image
+        helper.make_node("Gather", ["image_embeds", f"{p}/row0"], [f"{p}/rows"], name=f"{p}/Gather", axis=0),     # [B, S, hidden]
+        helper.make_node("Unsqueeze", [f"{p}/mask", f"{p}/last"], [f"{p}/mask3"], name=f"{p}/Unsqueeze"),
+        helper.make_node("Where", [f"{p}/mask3", f"{p}/rows", text], [embedded], name=f"{p}/Where"),
+    ]
+    i = list(g.node).index(producer) + 1
+    for k, n in enumerate(nodes): g.node.insert(i + k, n)
 
 
 def save_sharded(m, out, max_bytes, threshold=1024):

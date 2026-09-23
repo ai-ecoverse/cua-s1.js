@@ -14,8 +14,10 @@
       <a href="https://huggingface.co/cua-ai/cua-s1-4b-0.1">cua-s1-4b-0.1</a> is a LoRA on Qwen3.5-4B. It is shown one
       screen as an accessibility tree and a closed list of (element, action) options, one letter each, and picks the
       single best next action in one forward pass, on WebGPU. The screens below come from Cua's own task generator
-      (cua-bench-s1); ✓ marks the options its answer key accepts. The first visit downloads 4.7 GB.
+      (cua-bench-s1); ✓ marks the options its answer key accepts. Cua trained two adapters: one reads the accessibility
+      tree, the other a screenshot through Qwen3.5's vision tower. Each is its own download of about 5 GB.
     </p>
+    <p class="row"><a id="mode-text" href="?modality=text">Accessibility tree</a> · <a id="mode-multimodal" href="?modality=multimodal">Screenshot</a></p>
     <nav>
       <a href="./">cua-s1-forms demo</a>
       <a href="https://github.com/ai-ecoverse/cua-s1.js">GitHub</a>
@@ -32,6 +34,7 @@
       <h2>1 · The screen</h2>
       <div class="row"><select id="task"></select><span id="task-meta" class="muted"></span></div>
       <textarea id="tree" spellcheck="false"></textarea>
+      <img id="shot" alt="the screen the model sees" hidden />
     </section>
     <section class="panel">
       <h2>2 · The decision</h2>

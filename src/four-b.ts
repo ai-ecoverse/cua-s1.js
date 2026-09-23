@@ -5,10 +5,16 @@
 //
 // The graph returns hidden states; Qwen3.5-4B ties its output layer to the embeddings, so the letters' logits are
 // the final hidden state times the letters' embedding rows (head.safetensors, fp32).
+//
+// The multimodal adapter is a separate bundle: a screenshot instead of the accessibility tree, a vision graph that
+// turns it into one embedding per 2 x 2 patch block, and a decoder that splices those in at the <|image_pad|> tokens.
 
 import { Tokenizer } from "@huggingface/tokenizers";
 import type { InferenceSession, Tensor } from "onnxruntime-common";
 import { dropOtherRevisions, fetchFile, parseSafetensors, pool, type Progress } from "./fetch.ts";
+import { preprocess, ropePositions, visionInputs, type ImageLike, type VisionConfig } from "./four-b-vision.ts";
+
+export * from "./four-b-vision.ts";
 import type { OrtModule } from "./model.ts";
 
 export const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -27,8 +33,10 @@ export interface FourBContext {
   app: string;
   /** e.g. "form_filling", "login_auth", "consent_checkbox" (cua-bench-s1 `FAMILIES`) */
   taskFamily: string;
-  /** the screen as an accessibility tree; renderAxTree writes the format the model was trained on */
-  axTree: string;
+  /** the screen as an accessibility tree (text bundle); renderAxTree writes the format the model was trained on */
+  axTree?: string;
+  /** the screen as RGBA pixels (multimodal bundle), e.g. from canvas getImageData */
+  screenshot?: ImageLike;
   /** the user's objective, when the state does not already show it */
   goal?: string;
 }
@@ -47,15 +55,17 @@ export function describeOption(letter: string, o: FourBOption): string {
   return `${letter}. ${o.role} "${o.label}" -> ${action}`;
 }
 
-/** four_b.build_prompt's user message, text modality. */
-export function buildPrompt(options: FourBOption[], c: FourBContext): string {
+export type Modality = "text" | "multimodal";
+
+/** four_b.build_prompt's user message text. */
+export function buildPrompt(options: FourBOption[], c: FourBContext, modality: Modality = "text"): string {
   if (!options.length) throw new RangeError("no options to choose from");
   if (options.length > LETTERS.length) throw new RangeError(`${options.length} options exceeds the ${LETTERS.length}-letter budget`);
-  if (!c.axTree) throw new RangeError("the text modality requires an accessibility tree");
+  if (modality === "text" && !c.axTree) throw new RangeError("the text modality requires an accessibility tree");
   const lines = options.map((o, i) => describeOption(LETTERS[i], o)).join("\n");
   return (c.goal ? `Goal: ${c.goal}\n\n` : "")
     + `App: ${c.app}\nTask family: ${c.taskFamily}\n\n`
-    + `Accessibility tree:\n${c.axTree}\n\n`
+    + (modality === "text" ? `Accessibility tree:\n${c.axTree}\n\n` : "The current screenshot is attached.\n\n")
     + `Options:\n${lines}\n\nAnswer with a single letter.`;
 }
 
@@ -69,13 +79,16 @@ function pyStrip(s: string): string {
   return s.slice(a, b);
 }
 
-/** Qwen3.5's chat template for [system, user] with add_generation_prompt (thinking left on, as upstream calls it). */
-export function renderChat(options: FourBOption[], c: FourBContext): string {
+/** Qwen3.5's chat template for [system, user] with add_generation_prompt (thinking left on, as upstream calls it).
+ * Multimodal: the image block comes first, as one <|image_pad|> the caller expands to the image's token count. */
+export function renderChat(options: FourBOption[], c: FourBContext, modality: Modality = "text"): string {
   const user = buildPrompt(
     options.map((o) => ({ ...o, role: inert(o.role), label: inert(o.label), action: inert(o.action), entityId: o.entityId == null ? o.entityId : inert(o.entityId) })),
-    { app: inert(c.app), taskFamily: inert(c.taskFamily), axTree: inert(c.axTree), goal: c.goal == null ? c.goal : inert(c.goal) },
+    { app: inert(c.app), taskFamily: inert(c.taskFamily), axTree: c.axTree == null ? c.axTree : inert(c.axTree), goal: c.goal == null ? c.goal : inert(c.goal) },
+    modality,
   );
-  return `<|im_start|>system\n${pyStrip(SYSTEM_PROMPT)}<|im_end|>\n<|im_start|>user\n${pyStrip(user)}<|im_end|>\n<|im_start|>assistant\n<think>\n`;
+  const image = modality === "multimodal" ? "<|vision_start|><|image_pad|><|vision_end|>" : "";
+  return `<|im_start|>system\n${pyStrip(SYSTEM_PROMPT)}<|im_end|>\n<|im_start|>user\n${pyStrip(image + user)}<|im_end|>\n<|im_start|>assistant\n<think>\n`;
 }
 
 /** A row of the screen, in display order (cua-bench-s1 datagen/render.py). */
@@ -131,7 +144,7 @@ export interface FourBManifest {
   name: string;
   /** adapter repo@commit */
   run: string;
-  modality: "text";
+  modality: Modality;
   /** base model repo@commit */
   base: string;
   hidden_size: number;
@@ -139,6 +152,8 @@ export interface FourBManifest {
   letter_ids: number[];
   files: { head: string; tokenizer: string; tokenizer_config: string };
   variants: Record<string, FourBVariant>;
+  /** multimodal bundles: the vision graph (patches -> one embedding per 2 x 2 block) and its preprocessing */
+  vision?: { model: string; data: string[]; bytes: number; sizes: Record<string, number>; config: VisionConfig; image_token_id: number; parity?: FourBVariant["parity"] };
 }
 
 export interface ScoredOption { letter: string; option: FourBOption; probability: number }
@@ -160,31 +175,58 @@ export class CuaS1FourB {
   private session: InferenceSession;
   private head: Float32Array;
   private v: FourBVariant;
+  private vision: InferenceSession | null;
   private queue: Promise<unknown> = Promise.resolve();
 
-  constructor(a: { ort: OrtModule; session: InferenceSession; head: Float32Array; tokenizer: Tokenizer; manifest: FourBManifest; variant: string }) {
-    this.ort = a.ort; this.session = a.session; this.head = a.head; this.tokenizer = a.tokenizer;
+  constructor(a: { ort: OrtModule; session: InferenceSession; head: Float32Array; tokenizer: Tokenizer; manifest: FourBManifest; variant: string; vision?: InferenceSession }) {
+    this.ort = a.ort; this.session = a.session; this.head = a.head; this.tokenizer = a.tokenizer; this.vision = a.vision ?? null;
     this.manifest = a.manifest; this.variant = a.variant; this.v = a.manifest.variants[a.variant];
     if (!this.v) throw new Error(`unknown variant ${a.variant}; have ${Object.keys(a.manifest.variants)}`);
+    if (a.manifest.modality === "multimodal" && (!this.vision || !a.manifest.vision)) throw new Error("a multimodal bundle needs its vision graph");
   }
 
-  encode(options: FourBOption[], c: FourBContext): number[] {
-    return this.tokenizer.encode(renderChat(options, c), { add_special_tokens: false }).ids;
+  get modality(): Modality { return this.manifest.modality; }
+
+  /** Token ids of the rendered chat; for a screenshot, <|image_pad|> is expanded to `imageTokens` copies. */
+  encode(options: FourBOption[], c: FourBContext, imageTokens = 0): number[] {
+    const ids = this.tokenizer.encode(renderChat(options, c, this.modality), { add_special_tokens: false }).ids;
+    if (this.modality === "text") return ids;
+    const pad = this.manifest.vision!.image_token_id, at = ids.indexOf(pad);
+    if (at < 0 || ids.indexOf(pad, at + 1) >= 0) throw new Error("expected exactly one image placeholder");
+    return [...ids.slice(0, at), ...new Array<number>(imageTokens).fill(pad), ...ids.slice(at + 1)];
   }
 
-  /** Letter probabilities for token ids that end at the answer position (a rendered chat). */
-  probsForIds(ids: number[], n: number): Promise<number[]> {
+  /** The screenshot through the vision graph: one row of image_embeds per 2 x 2 patch block. */
+  async imageEmbeds(img: ImageLike): Promise<{ embeds: Float32Array; gridH: number; gridW: number }> {
+    const cfg = this.manifest.vision!.config, T = this.ort.Tensor;
+    const p = preprocess(img, cfg), vi = visionInputs(p.gridH, p.gridW, cfg), P = p.gridH * p.gridW, hd = cfg.hidden_size / cfg.num_heads;
+    const out = await this.vision!.run({
+      patches: new T("float32", p.data, [P, p.data.length / P]),
+      pos_idx: new T("int64", vi.posIdx, [P, 4]), pos_w: new T("float32", vi.posW, [P, 4]),
+      cos: new T("float32", vi.cos, [P, hd]), sin: new T("float32", vi.sin, [P, hd]),
+    }, ["image_embeds"]);
+    return { embeds: out.image_embeds.data as Float32Array, gridH: p.gridH, gridW: p.gridW };
+  }
+
+  /** Letter probabilities for token ids that end at the answer position (a rendered chat). With an image, `pos` holds
+   * the mRoPE positions and `image` the embeddings for its <|image_pad|> tokens. */
+  probsForIds(ids: number[], n: number, image?: { embeds: Float32Array; pos: number[][] }): Promise<number[]> {
     const run = this.queue.then(async () => {
-      const S = ids.length, T = this.ort.Tensor;
+      const S = ids.length, T = this.ort.Tensor, d = this.manifest.hidden_size;
+      const pos = image?.pos ?? [[...ids.keys()], [...ids.keys()], [...ids.keys()]];   // text: the three mRoPE rows are equal
       const feeds: Record<string, Tensor> = {
         input_ids: new T("int64", BigInt64Array.from(ids, BigInt), [1, S]),
         attention_mask: new T("int64", new BigInt64Array(S).fill(1n), [1, S]),
-        position_ids: new T("int64", BigInt64Array.from([...ids.keys(), ...ids.keys(), ...ids.keys()], BigInt), [3, 1, S]),   // text: the three mRoPE rows are equal
+        position_ids: new T("int64", BigInt64Array.from(pos.flat(), BigInt), [3, 1, S]),
       };
+      if (this.v.inputs.some((i) => i.name === "image_embeds")) {
+        const e = image?.embeds ?? new Float32Array(d);   // no image: one row of zeros, never gathered
+        feeds.image_embeds = new T("float32", e, [e.length / d, d]);
+      }
       for (const i of this.v.inputs) if (i.empty) feeds[i.name] = new T("float32", new Float32Array(i.empty.reduce((a, b) => a * b, 1)), i.empty);
       const out = await this.session.run(feeds, ["hidden_states"]);
       const h = out.hidden_states.data as Float32Array;
-      const d = this.manifest.hidden_size, last = h.subarray((S - 1) * d, S * d);
+      const last = h.subarray((S - 1) * d, S * d);
       const z = Array.from({ length: n }, (_, k) => {
         let s = 0;
         for (let j = 0, row = k * d; j < d; j++) s += this.head[row + j] * last[j];
@@ -199,14 +241,22 @@ export class CuaS1FourB {
 
   /** four_b.FourBModel.forward: a probability per option, in the given order. */
   async score(options: FourBOption[], c: FourBContext): Promise<FourBResult> {
-    const ids = this.encode(options, c);
     const t0 = performance.now();
-    const p = await this.probsForIds(ids, options.length);
+    let ids: number[], p: number[];
+    if (this.modality === "multimodal") {
+      if (!c.screenshot) throw new RangeError("the multimodal bundle needs a screenshot");
+      const img = await this.imageEmbeds(c.screenshot);
+      ids = this.encode(options, c, img.embeds.length / this.manifest.hidden_size);
+      p = await this.probsForIds(ids, options.length, { embeds: img.embeds, pos: ropePositions(ids, img.gridH, img.gridW, this.manifest.vision!.image_token_id, this.manifest.vision!.config.merge_size) });
+    } else {
+      ids = this.encode(options, c);
+      p = await this.probsForIds(ids, options.length);
+    }
     const scored = options.map((option, i) => ({ letter: LETTERS[i], option, probability: p[i] }));
     return { options: scored, best: scored.reduce((a, b) => (b.probability > a.probability ? b : a)), tokens: ids.length, latencyMs: performance.now() - t0 };
   }
 
-  async release() { await this.session.release(); }
+  async release() { await this.session.release(); await this.vision?.release(); }
 }
 
 export interface LoadFourBOptions {
@@ -236,7 +286,12 @@ export async function loadCuaS1FourB(baseUrl: string, o: LoadFourBOptions): Prom
   for (const [p, bytes] of Object.entries(v.sizes)) o.onProgress?.({ file: p, loaded: 0, total: bytes });   // the total is known up front
   const get = (p: string) => fetchFile(join(baseUrl, p), { cacheName, onProgress: o.onProgress, file: p, bytes: v.sizes[p], rev: manifest.run });
   const [tokJson, tokCfg] = (await Promise.all([get(manifest.files.tokenizer), get(manifest.files.tokenizer_config)])).map(decode);
-  const [head, graph, ...data] = await pool([manifest.files.head, v.model, ...v.data].map((p) => () => get(p)), o.concurrency ?? 2);
+  const vis = manifest.vision;
+  if (vis) for (const [p, bytes] of Object.entries(vis.sizes)) o.onProgress?.({ file: p, loaded: 0, total: bytes });
+  const visFiles = vis ? [vis.model, ...vis.data] : [];
+  const getAny = (p: string) => fetchFile(join(baseUrl, p), { cacheName, onProgress: o.onProgress, file: p, bytes: v.sizes[p] ?? vis?.sizes[p], rev: manifest.run });
+  const [head, graph, ...rest] = await pool([manifest.files.head, v.model, ...v.data, ...visFiles].map((p) => () => getAny(p)), o.concurrency ?? 2);
+  const data = rest.slice(0, v.data.length), visData = rest.slice(v.data.length);
   const weight = parseSafetensors(head.slice().buffer).weight;
   if (!weight || weight.shape[0] !== manifest.letters.length || weight.shape[1] !== manifest.hidden_size) throw new Error("head.safetensors: expected weight [letters, hidden]");
   const session = await o.ort.InferenceSession.create(graph, {
@@ -245,6 +300,12 @@ export async function loadCuaS1FourB(baseUrl: string, o: LoadFourBOptions): Prom
     externalData: v.data.map((p, i) => ({ path: p.split("/").pop()!, data: data[i] })),
     ...o.sessionOptions,
   });
+  const vision = vis ? await o.ort.InferenceSession.create(visData[0], {
+    graphOptimizationLevel: "all",
+    executionProviders: o.executionProviders ?? ["webgpu", "wasm"],
+    externalData: vis.data.map((p, i) => ({ path: p.split("/").pop()!, data: visData[i + 1] })),
+    ...o.sessionOptions,
+  }) : undefined;
   await dropOtherRevisions(baseUrl, manifest.run, cacheName);
-  return new CuaS1FourB({ ort: o.ort, session, head: weight.data, tokenizer: new Tokenizer(JSON.parse(tokJson), JSON.parse(tokCfg)), manifest, variant });
+  return new CuaS1FourB({ ort: o.ort, session, head: weight.data, tokenizer: new Tokenizer(JSON.parse(tokJson), JSON.parse(tokCfg)), manifest, variant, vision });
 }

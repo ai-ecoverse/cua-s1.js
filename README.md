@@ -88,8 +88,10 @@ skips nearly every field on an unfamiliar form is the model being out of scope, 
 [`cua-ai/cua-s1-4b-0.1`](https://huggingface.co/cua-ai/cua-s1-4b-0.1) is a different kind of model: a LoRA on
 [Qwen3.5-4B](https://huggingface.co/Qwen/Qwen3.5-4B). It is shown one screen as an accessibility tree and a closed
 list of (element, action) options, one letter each, and picks the single best next action. It is a port of Cua's
-`cua_s1/four_b.py`: one forward pass, then a softmax over the option letters' logits at the final position. Text
-modality only; the multimodal adapter would also need the vision tower.
+`cua_s1/four_b.py`: one forward pass, then a softmax over the option letters' logits at the final position. Cua
+trained two independent adapters, and each is its own bundle: `cua-s1-4b-0.1` reads the accessibility tree,
+`cua-s1-4b-0.1-multimodal` a screenshot (`{ screenshot: ImageData }` instead of `axTree`) through Qwen3.5's vision
+tower.
 
 ```ts
 import * as ort from "onnxruntime-web/webgpu";
@@ -118,6 +120,15 @@ r.options; // A fill 0.294, B skip 0.374, C click 0.332: r.best is B. 0.1 is thi
   and scores the fixtures. This is kev.js's pipeline: Kev is also a LoRA on Qwen3.5. The graph returns hidden
   states. Qwen3.5-4B ties its output layer to the embeddings, so the head is just the 26 letters' embedding rows in
   fp32 (266 kB). The bundle is 4.7 GB.
+- **Screenshots** (`export/four_b/vision.py`, `src/four-b-vision.ts`): the multimodal adapter also adapts the vision
+  tower, so it is exported from the same merge: Qwen3.5's 24-block ViT and patch merger. Everything that depends on
+  the image's size is computed in JS and passed in: the bilinear taps into the 48×48 position table, the 2D rotary
+  angles, and the 3D (mRoPE) positions of the image tokens. That leaves plain tensor math in the graph, which is
+  checked against transformers' own vision module. The decoder takes the result as `image_embeds` at the
+  `<|image_pad|>` tokens. `preprocess` ports Qwen's image processor, including torch's antialiased bicubic resize
+  (Pillow's a = −0.5 kernel). It matches the processor's pixels to 1.2e-5 on average. The vision graph keeps its
+  weights in fp16 (640 MB): int8 weights put its output 4.6% off in RMS and doubled the decoder's error. The bundle
+  is 5.0 GB.
 - **Prompt:** `renderChat` reproduces `build_prompt` and Qwen's chat template, which ends in an open `<think>`
   block because upstream leaves thinking on. On the 57 fixture tasks the text matches byte for byte, and the
   tokenizer (`@huggingface/tokenizers`) reproduces upstream's token ids. One deliberate difference: `<|...|>` in
@@ -127,11 +138,17 @@ r.options; // A fill 0.294, B skip 0.374, C click 0.332: r.best is B. 0.1 is thi
   7 families): the fp32 graph is within 7.5e-5. The int8 graph is within 0.0048 on onnxruntime, with the argmax
   changed on 4 near-ties. In Chrome on WebGPU it is within 0.0042, with 2 flips, both where upstream's top two
   options are within 0.0002 of each other.
-- **Latency:** 480–1,270 ms per decision (median 680 ms) for 358–979-token prompts on WebGPU in Chrome on an M4 Max.
-  The bundle loads in about 6 s once it is local; the first visit downloads 4.7 GB into Cache Storage.
+  Screenshots, against `FourBModel` with its multimodal adapter on 38 rendered tasks: the fp32 graphs are within
+  7.5e-5; in Chrome on WebGPU within 0.0063, with 1 flip where upstream's top two are 0.0007 apart. The generator
+  draws with DejaVu Sans, as on Linux (Cua's font paths do not exist on macOS, where it would fall back to Pillow's
+  bitmap font).
+- **Latency** on WebGPU in Chrome on an M4 Max: 480–1,270 ms per decision (median 680 ms) for 358–979-token prompts;
+  with a screenshot, including the vision tower, 840–2,670 ms (median 1,330 ms) for 477–1,277 tokens. A bundle loads
+  in about 7 s once it is local; the first visit downloads ~5 GB into Cache Storage.
 
 What the checkpoint itself does: its choices are nearly flat (mean top probability 0.21 over 3–24 options). Its
-top pick is an option the answer key accepts on 46 of the 57 tasks, where a uniform pick would manage 36. Cua's
+top pick is an option the answer key accepts on 46 of the 57 tasks, where a uniform pick would manage 36. With
+screenshots: 32 of 38, against 24.7 for a uniform pick. Cua's
 training target spreads over every acceptable option, including every correct `skip`. Cua's own
 [benchmark](https://github.com/trycua/cua/tree/main/libs/cua-bench-s1) has 0.1 at 0.167–0.571 per family on
 held-out real screens.
@@ -155,10 +172,12 @@ Cua's own code. `export.py` pins the Hugging Face checkpoint to a commit and wri
 with a `manifest.json`. `HF_TOKEN=... uv run python upload_hf.py` publishes it to `ai-ecoverse/cua-s1.js`, the
 revision's files and the manifest in one commit per model (`--only <folder>` publishes one).
 
-cua-s1-4b needs the `four-b` dependency group and about 45 GB of disk at peak: `uv sync --group four-b &&
-./build_4b_model.sh cua-ai/cua-s1-4b-0.1`. It writes `public/models/cua-s1-4b-0.1` (not in git) and
-`fixtures/cua-s1-4b-0.1.json`. `npm test` checks the prompt rendering against the fixtures, and checks the tokenizer
-and the graph as well when the bundle is there. `npm run dev` serves both demos: `/` and `/4b.html`.
+cua-s1-4b needs the `four-b` dependency group and about 45 GB of disk at peak (60 GB for screenshots):
+`uv sync --group four-b && ./build_4b_model.sh [--multimodal] cua-ai/cua-s1-4b-0.1`. It writes
+`public/models/cua-s1-4b-0.1[-multimodal]` (not in git) and the fixtures (`fixtures/cua-s1-4b-0.1*.json`, plus the
+rendered screenshots). `npm test` checks the prompt rendering and the image preprocessing against the fixtures, and
+checks the tokenizer and the graphs as well when a bundle is there. `npm run dev` serves both demos: `/` and
+`/4b.html` (`?modality=multimodal` for screenshots).
 
 Releases publish to npm from CI (`.github/workflows/release.yaml`, trusted publishing, OIDC) via
 [semantic-release](https://semantic-release.org/) on every push to `main`. Commits that follow

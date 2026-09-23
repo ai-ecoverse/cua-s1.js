@@ -34,3 +34,5 @@ textarea#tree { width: 100%; min-height: 520px; font: 12px/1.45 ui-monospace, Me
 select { font: inherit; max-width: 100%; padding: 4px 6px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: inherit; }
 td.bar { width: 30%; } td.bar span { display: block; height: 8px; border-radius: 4px; background: var(--accent); }
 tr.best td:nth-child(2) { font-weight: 600; } td.gold { color: var(--ok); }
+img#shot { width: 100%; border: 1px solid var(--line); border-radius: 6px; }
+a.current { font-weight: 600; text-decoration: none; color: inherit; }

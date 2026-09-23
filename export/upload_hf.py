@@ -64,11 +64,11 @@ cua-s1 is a research checkpoint trained on synthetic forms. Read Cua's
 FOUR_B = """
 ## cua-s1-4b
 
-`{name}/` is [`{adapter}`](https://huggingface.co/{adapter})'s text adapter (a rank-16 LoRA) merged in fp32 into
+`{name}/` is [`{adapter}`](https://huggingface.co/{adapter})'s {modality} adapter (a rank-16 LoRA) merged in fp32 into
 [`{base}`](https://huggingface.co/{base}) and exported with the onnxruntime-genai model builder: int8 weights, fp32
 activations, WebGPU. The graph returns hidden states; Qwen3.5-4B ties its output layer to the embeddings, so the
 option letters' logits are the final hidden state times `head.safetensors` (the 26 letter rows, fp32). Weights are
-split into files of at most 32 MB.
+split into files of at most 32 MB.{vision}
 
 ```js
 import * as ort from "onnxruntime-web/webgpu";
@@ -79,7 +79,7 @@ const r = await model.score(options, {{ app, taskFamily: "form_filling", axTree:
 ```
 
 Against Cua's own `cua_s1.four_b.FourBModel` (fp32 PyTorch) on {tasks} tasks from cua-bench-s1's generator: max
-|Δp| {dp:.4f}, {flips} argmax flips (near-ties). The fp32 export matches to 7.5e-5.
+|Δp| {dp:.4f}, {flips} argmax flips (near-ties).
 
 Licensing: Qwen3.5-4B is Apache-2.0. Cua publishes the cua-s1-4b-0.1 adapter without a license file, and its
 model card notes that official checkpoints may carry their own terms. Check with Cua before using this folder
@@ -112,8 +112,14 @@ def main():
         if "variants" in m:
             v = next(iter(m["variants"].values()))
             size, parity = f"{v['bytes'] / 1e9:.1f} GB", f"{v['parity']['max_abs_dp']:.1e} over {v['parity']['tasks']} tasks"
+            vision = "" if "vision" not in m else (
+                f"\n\nThe screenshot adapter also adapts the vision tower, so `vision/` is Qwen3.5's ViT and patch merger from the same "
+                f"merge ({m['vision']['bytes'] / 1e6:.0f} MB, fp16 weights, fp32 compute). Its size-dependent inputs (position-table taps, 2D "
+                f"rotary angles) are computed by the caller, and the decoder takes its output as `image_embeds` at the "
+                f"`<|image_pad|>` tokens.")
             four_b += FOUR_B.format(name=n, adapter=repo, base=m["base"].split("@")[0], repo=a.repo, tasks=v["parity"]["tasks"],
-                                    dp=v["parity"]["max_abs_dp"], flips=v["parity"]["argmax_flips"])
+                                    dp=v["parity"]["max_abs_dp"], flips=v["parity"]["argmax_flips"],
+                                    modality="screenshot (multimodal)" if "vision" in m else "text", vision=vision)
         else:
             size, parity = f"{m['bytes'] / 1e6:.1f} MB", f"{m['parity']['max_abs_dp']:.1e} over {m['parity']['decisions']} decisions"
         rows.append(f"| `{n}` | [`{repo}`](https://huggingface.co/{repo}) @ `{rev[:7]}` | {size} | {parity} |")

@@ -3,12 +3,16 @@
     uv run python -m four_b.package --build build/cua-s1-4b-0.1 --out ../public/models/cua-s1-4b-0.1 \
         --variant q8f32=web-q8f32 --fixtures ../fixtures/cua-s1-4b-0.1.json
 
+Multimodal: --vision adds the vision graph (four_b.vision's web output: fp16 weights, fp32 compute) under
+r-<rev>/vision/ with its preprocessing config, and parity then runs screenshot -> vision graph -> decoder (--merged
+supplies Qwen's processor for it).
+
 Large files are hard-linked, not copied. Everything but the manifest lives under r-<adapter commit>/, so publishing
 a new checkpoint never overwrites a file an older manifest points at. With --fixtures, each variant's parity against
 FourBModel is measured (CPU EP) and recorded."""
 import argparse, json, os, shutil
 import onnx
-from .parity import OrtFourB
+from .parity import OrtFourB, OrtVision, rope_positions, IMAGE_PAD
 
 ONNX_TYPES = {onnx.TensorProto.FLOAT16: "float16", onnx.TensorProto.FLOAT: "float32", onnx.TensorProto.INT64: "int64"}
 
@@ -38,6 +42,8 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--variant", action="append", required=True, help="name=dir, e.g. q8f32=web-q8f32")
     ap.add_argument("--fixtures")
+    ap.add_argument("--vision", help="vision graph dir (model.onnx + shards) and vision.json one level up")
+    ap.add_argument("--merged", help="merged checkpoint dir, for the processor and vision config in the parity run")
     a = ap.parse_args()
     meta = json.load(open(f"{a.build}/cua4b.json"))
     r = f"r-{meta['run'].partition('@')[2][:7] or 'local'}"
@@ -51,6 +57,14 @@ def main():
             raise SystemExit(f"{a.fixtures} is from {fx['run']}, but {a.build} was exported from {meta['run']}")
         fixtures = fx["fixtures"]
     shared = {f"{r}/{f}": os.path.getsize(f"{a.out}/{r}/{f}") for f in ("head.safetensors", "tokenizer.json", "tokenizer_config.json")}
+    vision = None
+    if a.vision:
+        os.makedirs(f"{a.out}/{r}/vision", exist_ok=True)
+        vfiles = ["model.onnx", *sorted((f for f in os.listdir(a.vision) if f.startswith("model.onnx.data")), key=lambda f: (len(f), f))]
+        for f in vfiles: link(f"{a.vision}/{f}", f"{a.out}/{r}/vision/{f}")
+        sizes = {f"{r}/vision/{f}": os.path.getsize(f"{a.out}/{r}/vision/{f}") for f in vfiles}
+        vision = {"model": f"{r}/vision/model.onnx", "data": [f"{r}/vision/{f}" for f in vfiles[1:]], "bytes": sum(sizes.values()),
+                  "sizes": sizes, "config": json.load(open(f"{os.path.dirname(os.path.normpath(a.vision))}/vision.json")), "image_token_id": IMAGE_PAD}
     variants = {}
     for spec in a.variant:
         name, d = spec.split("=", 1)
@@ -68,15 +82,25 @@ def main():
         if fixtures:
             import numpy as np
             rt = OrtFourB(f"{a.out}/{vdir}/model.onnx", f"{a.out}/{r}/head.safetensors")
+            if vision:
+                from PIL import Image
+                from transformers import AutoImageProcessor
+                vis, proc = OrtVision(f"{a.out}/{vision['model']}", a.merged), AutoImageProcessor.from_pretrained(a.merged)
             worst, flips, hits = 0.0, 0, 0
             for f in fixtures:
-                ref = np.array(f["probs"]); got = rt.probs(f["input_ids"], len(ref))
+                ref = np.array(f["probs"])
+                if vision:
+                    px = proc(images=[Image.open(os.path.join(os.path.dirname(a.fixtures), f["screenshot"])).convert("RGB")], return_tensors="np")
+                    _, gh, gw = px["image_grid_thw"][0].tolist()
+                    got = rt.probs(f["input_ids"], len(ref), rope_positions(f["input_ids"], gh, gw), vis.embeds(px["pixel_values"], gh, gw))
+                else:
+                    got = rt.probs(f["input_ids"], len(ref))
                 worst = max(worst, float(np.abs(got - ref).max())); flips += int(got.argmax() != ref.argmax())
                 hits += int("ABCDEFGHIJKLMNOPQRSTUVWXYZ"[got.argmax()] in f["gold"])
             v["parity"] = {"max_abs_dp": round(worst, 6), "argmax_flips": flips, "tasks": len(fixtures), "top1_in_gold": hits}
             print(name, v["parity"])
         variants[name] = v
-    keep = {"manifest.json", *shared}
+    keep = {"manifest.json", *shared, *(vision["sizes"] if vision else [])}
     for v in variants.values(): keep |= {v["model"], *v["data"]}
     for root, _, fs in os.walk(a.out, topdown=False):   # drop files from earlier packagings: the directory is published as is
         for f in fs:
@@ -85,7 +109,7 @@ def main():
         if root != a.out and not os.listdir(root): os.rmdir(root)
     manifest = {"name": os.path.basename(os.path.normpath(a.out)), **{k: meta[k] for k in ("run", "modality", "base", "hidden_size", "letters", "letter_ids")},
                 "files": {"head": f"{r}/head.safetensors", "tokenizer": f"{r}/tokenizer.json", "tokenizer_config": f"{r}/tokenizer_config.json"},
-                "variants": variants}
+                "variants": variants, **({"vision": vision} if vision else {})}
     json.dump(manifest, open(f"{a.out}/manifest.json", "w"), indent=2)
     print(f"{a.out}/manifest.json: {', '.join(f'{k} {v['bytes'] / 1e6:.0f} MB' for k, v in variants.items())}")
 
