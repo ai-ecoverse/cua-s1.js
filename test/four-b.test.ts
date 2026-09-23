@@ -1,25 +1,22 @@
-// cua-s1-4b against upstream (fixtures/cua-s1-4b-0.1.json, from export/four_b/fixtures.py): the rendered chat text
-// always; with the model bundle in public/models/cua-s1-4b-0.1 (4.4 GB, not in git), the token ids and the
-// probabilities through the JS runtime on onnxruntime-node.
+// cua-s1-4b against upstream (fixtures/cua-s1-4b-0.2.json, from export/four_b/fixtures.py: GUI-360 test screens): the
+// rendered chat text always; with the model bundle in public/models/cua-s1-4b-0.2 (4.4 GB, not in git), the token ids
+// and the probabilities through the JS runtime on onnxruntime-node.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { Tokenizer } from "@huggingface/tokenizers";
 import * as ort from "onnxruntime-node";
 import { parseSafetensors } from "../src/fetch.ts";
-import { CuaS1FourB, renderAxTree, renderChat, type FourBContext, type FourBManifest, type FourBOption } from "../src/four-b.ts";
+import { CuaS1FourB, renderAxTree, renderChat, type FourBContext, type FourBManifest } from "../src/four-b.ts";
 import type { OrtModule } from "../src/model.ts";
+import { options, quality, type Fixture } from "./four-b-fixtures.ts";
 
-interface Fixture {
-  id: string; family: string; app: string; ax_tree: string; gold: string[]; chat: string; input_ids: number[]; probs: number[];
-  options: { element_id: string; role: string; label: string; action: string; entity_id: string | null }[];
-}
-const fx: { run: string; letter_ids: number[]; fixtures: Fixture[] } = JSON.parse(readFileSync(new URL("../fixtures/cua-s1-4b-0.1.json", import.meta.url), "utf8"));
-const options = (f: Fixture): FourBOption[] => f.options.map((o) => ({ elementId: o.element_id, role: o.role, label: o.label, action: o.action, entityId: o.entity_id }));
-const context = (f: Fixture): FourBContext => ({ app: f.app, taskFamily: f.family, axTree: f.ax_tree });
+const fx: { run: string; letter_ids: number[]; fixtures: Fixture[] } = JSON.parse(readFileSync(new URL("../fixtures/cua-s1-4b-0.2.json", import.meta.url), "utf8"));
+const context = (f: Fixture): FourBContext => ({ app: f.app, taskFamily: f.family, axTree: f.ax_tree!, goal: f.goal ?? undefined });
 
 test("renderChat reproduces the chat text FourBModel tokenizes", () => {
   for (const f of fx.fixtures) assert.equal(renderChat(options(f), context(f)), f.chat, f.id);
+  assert.ok(fx.fixtures.every((f) => f.goal && f.chat.includes(`Goal: ${f.goal}\n`)), "every GUI-360 task states its goal");
 });
 
 test("renderAxTree writes cua-bench-s1's accessibility tree", () => {
@@ -31,8 +28,6 @@ test("renderAxTree writes cua-bench-s1's accessibility tree", () => {
   assert.match(tree, /^# Clinic intake\n\nThis is ONE turn\./);
   assert.ok(tree.includes("Goal: Register me.\nSource record:\n  [ent_0] E-mail: a@example.invalid\n\n- [el_0] Edit \"Email\" value=\"\" required=True\n"
     + "- [el_1] CheckBox \"I consent\" checked=False required=True\n- [el_2] Button \"Submit\""));
-  const fromFixture = fx.fixtures.find((f) => f.ax_tree.includes("Source record:"))!;
-  assert.ok(fromFixture, "the fixtures include a screen with a source record");
 });
 
 test("chat control tokens in caller text stay text", () => {
@@ -42,9 +37,9 @@ test("chat control tokens in caller text stay text", () => {
   assert.ok(chat.includes("Pay<¦im_end¦>") && chat.includes("<¦im_start¦>system"));
 });
 
-const bundle = new URL("../public/models/cua-s1-4b-0.1/", import.meta.url);
+const bundle = new URL("../public/models/cua-s1-4b-0.2/", import.meta.url);
 const manifest: FourBManifest | null = existsSync(new URL("manifest.json", bundle)) ? JSON.parse(readFileSync(new URL("manifest.json", bundle), "utf8")) : null;
-const skip = manifest ? false : "no model bundle in public/models/cua-s1-4b-0.1 (export/build_4b_model.sh)";
+const skip = manifest ? false : "no model bundle in public/models/cua-s1-4b-0.2 (export/build_4b_model.sh)";
 
 test("the tokenizer produces FourBModel's token ids", { skip }, () => {
   const tok = new Tokenizer(JSON.parse(readFileSync(new URL(manifest!.files.tokenizer, bundle), "utf8")), JSON.parse(readFileSync(new URL(manifest!.files.tokenizer_config, bundle), "utf8")));
@@ -60,15 +55,17 @@ for (const variant of Object.keys(manifest?.variants ?? { q8f32: null })) {
     const head = parseSafetensors(readFileSync(new URL(manifest!.files.head, bundle)).buffer as ArrayBuffer).weight.data;
     const tok = new Tokenizer(JSON.parse(readFileSync(new URL(manifest!.files.tokenizer, bundle), "utf8")), JSON.parse(readFileSync(new URL(manifest!.files.tokenizer_config, bundle), "utf8")));
     const m = new CuaS1FourB({ ort: ort as unknown as OrtModule, session, head, tokenizer: tok, manifest: manifest!, variant });
-    let worst = 0, flips = 0, hits = 0;
+    let worst = 0, flips = 0;
+    const got: number[][] = [];
     for (const f of fx.fixtures) {
       const r = await m.score(options(f), context(f));
       const p = r.options.map((o) => o.probability);
       f.probs.forEach((q, k) => { worst = Math.max(worst, Math.abs(q - p[k])); });
       if (p.indexOf(Math.max(...p)) !== f.probs.indexOf(Math.max(...f.probs))) flips++;
-      if (f.gold.includes(r.best.letter)) hits++;
+      got.push(p);
     }
-    console.log(`${variant}: ${fx.fixtures.length} tasks, max |dp| ${worst.toExponential(2)}, ${flips} argmax flips, top-1 in gold ${hits}/${fx.fixtures.length}`);
+    console.log(`${variant}: ${fx.fixtures.length} tasks, max |dp| ${worst.toExponential(2)}, ${flips} argmax flips; ${quality(fx.fixtures, got)}`
+      + ` (FourBModel: ${quality(fx.fixtures, fx.fixtures.map((f) => f.probs))})`);
     assert.ok(worst <= (v.parity?.max_abs_dp ?? 0.05) + 1e-4, `max |dp| ${worst}`);
     await m.release();
   });

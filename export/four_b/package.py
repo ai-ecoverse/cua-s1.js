@@ -1,7 +1,7 @@
 """Assemble the cua-s1-4b web bundle: manifest.json, tokenizer, letter head and one directory per ONNX variant.
 
-    uv run python -m four_b.package --build build/cua-s1-4b-0.1 --out ../public/models/cua-s1-4b-0.1 \
-        --variant q8f32=web-q8f32 --fixtures ../fixtures/cua-s1-4b-0.1.json
+    uv run python -m four_b.package --build build/cua-s1-4b-0.2 --out ../public/models/cua-s1-4b-0.2 \
+        --variant q8f32=web-q8f32 --fixtures ../fixtures/cua-s1-4b-0.2.json
 
 Multimodal: --vision adds the vision graph (four_b.vision's web output: fp16 weights, fp32 compute) under
 r-<rev>/vision/ with its preprocessing config, and parity then runs screenshot -> vision graph -> decoder (--merged
@@ -12,6 +12,7 @@ a new checkpoint never overwrites a file an older manifest points at. With --fix
 FourBModel is measured (CPU EP) and recorded."""
 import argparse, json, os, shutil
 import onnx
+from .fixtures import summary
 from .parity import OrtFourB, OrtVision, rope_positions, IMAGE_PAD
 
 ONNX_TYPES = {onnx.TensorProto.FLOAT16: "float16", onnx.TensorProto.FLOAT: "float32", onnx.TensorProto.INT64: "int64"}
@@ -86,7 +87,7 @@ def main():
                 from PIL import Image
                 from transformers import AutoImageProcessor
                 vis, proc = OrtVision(f"{a.out}/{vision['model']}", a.merged), AutoImageProcessor.from_pretrained(a.merged)
-            worst, flips, hits = 0.0, 0, 0
+            worst, flips, got_all = 0.0, 0, []
             for f in fixtures:
                 ref = np.array(f["probs"])
                 if vision:
@@ -96,8 +97,8 @@ def main():
                 else:
                     got = rt.probs(f["input_ids"], len(ref))
                 worst = max(worst, float(np.abs(got - ref).max())); flips += int(got.argmax() != ref.argmax())
-                hits += int("ABCDEFGHIJKLMNOPQRSTUVWXYZ"[got.argmax()] in f["gold"])
-            v["parity"] = {"max_abs_dp": round(worst, 6), "argmax_flips": flips, "tasks": len(fixtures), "top1_in_gold": hits}
+                got_all.append(got.tolist())
+            v["parity"] = {"max_abs_dp": round(worst, 6), "argmax_flips": flips, "tasks": len(fixtures), "quality": summary(fixtures, got_all)}
             print(name, v["parity"])
         variants[name] = v
     keep = {"manifest.json", *shared, *(vision["sizes"] if vision else [])}

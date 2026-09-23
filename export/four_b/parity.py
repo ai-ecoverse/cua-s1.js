@@ -1,7 +1,7 @@
 """The browser algorithm in Python against onnxruntime, checked against FourBModel's probabilities (fixtures.py).
 
-    uv run python -m four_b.parity --model build/cua-s1-4b-0.1/web-q8f32/model.onnx \
-        --head build/cua-s1-4b-0.1/head.safetensors --fixtures ../fixtures/cua-s1-4b-0.1.json
+    uv run python -m four_b.parity --model build/cua-s1-4b-0.2/web-q8f32/model.onnx \
+        --head build/cua-s1-4b-0.2/head.safetensors --fixtures ../fixtures/cua-s1-4b-0.2.json
 
 One pass over the whole prompt with empty caches; the final position's hidden state (after the final norm) times the
 option letters' output rows, softmaxed over the task's letters, is FourBModel.forward's readout.
@@ -14,6 +14,7 @@ import argparse, json
 import numpy as np
 import onnxruntime as ort
 from safetensors.numpy import load_file
+from .fixtures import summary
 
 
 class OrtFourB:
@@ -83,7 +84,7 @@ def main():
         from PIL import Image
         from transformers import AutoImageProcessor
         vis, proc = OrtVision(a.vision, a.merged), AutoImageProcessor.from_pretrained(a.merged)
-    worst, flips, hits, n = 0.0, 0, 0, 0
+    worst, flips, n, got_all = 0.0, 0, 0, []
     for f in fx["fixtures"]:
         ref = np.array(f["probs"])
         if a.vision:
@@ -94,8 +95,8 @@ def main():
         else:
             got = rt.probs(f["input_ids"], len(ref))
         worst = max(worst, float(np.abs(got - ref).max())); flips += int(got.argmax() != ref.argmax())
-        hits += int("ABCDEFGHIJKLMNOPQRSTUVWXYZ"[got.argmax()] in f["gold"]); n += 1
-    print(json.dumps({"model": a.model, "tasks": n, "max_abs_dp": round(worst, 6), "argmax_flips": flips, "top1_in_gold": hits}))
+        got_all.append(got.tolist()); n += 1
+    print(json.dumps({"model": a.model, "tasks": n, "max_abs_dp": round(worst, 6), "argmax_flips": flips, "quality": summary(fx["fixtures"], got_all)}))
 
 
 if __name__ == "__main__":

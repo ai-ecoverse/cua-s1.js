@@ -1,6 +1,6 @@
 """Fold a cua-s1-4b LoRA into Qwen/Qwen3.5-4B in fp32 and write a checkpoint the onnxruntime-genai builder reads.
 
-    uv run python -m four_b.merge --adapter cua-ai/cua-s1-4b-0.1 [--modality multimodal] --out build/cua-s1-4b-0.1
+    uv run python -m four_b.merge --adapter cua-ai/cua-s1-4b-0.2 [--modality multimodal] --out build/cua-s1-4b-0.2
 
 The text and multimodal adapters are trained independently: the multimodal one also adapts the vision tower's MLPs
 and its merger (linear_fc1/linear_fc2), so its export takes the vision weights from this merged checkpoint too.
@@ -23,7 +23,7 @@ LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"   # cua_s1.four_b.LETTERS
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--adapter", default="cua-ai/cua-s1-4b-0.1")
+    ap.add_argument("--adapter", default="cua-ai/cua-s1-4b-0.2")
     ap.add_argument("--modality", default="text", choices=["text", "multimodal"])
     ap.add_argument("--out", required=True)
     a = ap.parse_args()

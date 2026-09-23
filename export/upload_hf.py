@@ -9,7 +9,7 @@ import argparse, json, os
 from huggingface_hub import HfApi
 
 CARD = """---
-license: {license}
+license: {license}{license_extra}
 library_name: onnxruntime-web
 pipeline_tag: other
 base_model:
@@ -72,24 +72,24 @@ split into files of at most 32 MB.{vision}
 
 ```js
 import * as ort from "onnxruntime-web/webgpu";
-import {{ loadCuaS1FourB, renderAxTree }} from "@ai-ecoverse/cua-s1.js/4b";
+import {{ elementDecisions, loadCuaS1FourB }} from "@ai-ecoverse/cua-s1.js/4b";
 
 const model = await loadCuaS1FourB("https://huggingface.co/{repo}/resolve/main/{name}", {{ ort }});
-const r = await model.score(options, {{ app, taskFamily: "form_filling", axTree: renderAxTree(title, rows, entities) }});
+const r = await model.score(options, {{ app, taskFamily, goal, {input} }});
+elementDecisions(r.options);   // per element, its likeliest action
 ```
 
-Against Cua's own `cua_s1.four_b.FourBModel` (fp32 PyTorch) on {tasks} tasks from cua-bench-s1's generator: max
-|Δp| {dp:.4f}, {flips} argmax flips (near-ties).
+Against Cua's own `cua_s1.four_b.FourBModel` (fp32 PyTorch) on {tasks} real Word, Excel and PowerPoint steps from
+[GUI-360](https://huggingface.co/datasets/vyokky/GUI-360)'s test split: max |Δp| {dp:.4f}, {flips} argmax flips. Every
+element's likeliest action is the expected one on {quality} of them with this export, as cua-bench-s1 scores it.
 
-Licensing: Qwen3.5-4B is Apache-2.0. Cua publishes the cua-s1-4b-0.1 adapter without a license file, and its
-model card notes that official checkpoints may carry their own terms. Check with Cua before using this folder
-beyond research and evaluation.
+Licensing: the adapter and Qwen3.5-4B are both Apache-2.0.
 """
 
 
 def published(name, m):
     if "variants" in m:   # cua-s1-4b: tokenizer, head, and each variant's graph and weight shards
-        files = [*m["files"].values(), *(p for v in m["variants"].values() for p in [v["model"], *v["data"]])]
+        files = [*m["files"].values(), *(p for v in [*m["variants"].values(), *([m["vision"]] if "vision" in m else [])] for p in [v["model"], *v["data"]])]
     else:
         files = [m["model"], *([m["shared_options"]["model"]] if "shared_options" in m else []), m["checkpoint"]]
     return [f"{name}/{p}" for p in ["manifest.json", *files]]
@@ -119,6 +119,8 @@ def main():
                 f"`<|image_pad|>` tokens.")
             four_b += FOUR_B.format(name=n, adapter=repo, base=m["base"].split("@")[0], repo=a.repo, tasks=v["parity"]["tasks"],
                                     dp=v["parity"]["max_abs_dp"], flips=v["parity"]["argmax_flips"],
+                                    quality=v["parity"]["quality"].split(",")[0].removeprefix("task accuracy "),
+                                    input="screenshot: imageData" if "vision" in m else "axTree",
                                     modality="screenshot (multimodal)" if "vision" in m else "text", vision=vision)
         else:
             size, parity = f"{m['bytes'] / 1e6:.1f} MB", f"{m['parity']['max_abs_dp']:.1e} over {m['parity']['decisions']} decisions"
@@ -127,7 +129,8 @@ def main():
                    | {m["base"].split("@")[0] for m in manifests.values() if "base" in m})
     card = CARD.format(repo=a.repo, table="\n".join(rows), bases="\n".join(f"- {b}" for b in bases),
                        base=next(b for b in bases if b.endswith("forms")) if any(b.endswith("forms") for b in bases) else bases[0],
-                       license="other" if four_b else "mit", tags=", qwen3.5, lora" if four_b else "", four_b=four_b)
+                       license="other" if four_b else "mit",
+                       license_extra="\nlicense_name: mit-and-apache-2.0" if four_b else "", tags=", qwen3.5, lora" if four_b else "", four_b=four_b)
     if a.dry_run:
         print(card); return
     api = HfApi(token=os.environ.get("HF_TOKEN"))

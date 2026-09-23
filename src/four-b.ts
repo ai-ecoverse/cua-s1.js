@@ -136,8 +136,8 @@ export interface FourBVariant {
   sizes: Record<string, number>;
   inputs: IOInfo[];
   outputs: IOInfo[];
-  /** against upstream's FourBModel (fp32 PyTorch) on the bundled fixtures */
-  parity?: { max_abs_dp: number; argmax_flips: number; tasks: number; top1_in_gold: number };
+  /** against upstream's FourBModel (fp32 PyTorch) on the bundled fixtures; `quality` is how often this variant is right */
+  parity?: { max_abs_dp: number; argmax_flips: number; tasks: number; quality: string };
 }
 
 export interface FourBManifest {
@@ -165,6 +165,17 @@ export interface FourBResult {
   best: ScoredOption;
   tokens: number;
   latencyMs: number;
+}
+
+/** The likeliest action for each element, as cua-bench-s1 scores the model: every element's options are compared
+ * among themselves. A screen is handled right when each element's choice is the expected one (mostly `skip`). */
+export function elementDecisions(options: ScoredOption[]): Map<string, ScoredOption> {
+  const best = new Map<string, ScoredOption>();
+  for (const o of options) {
+    const b = best.get(o.option.elementId);
+    if (!b || o.probability > b.probability) best.set(o.option.elementId, o);
+  }
+  return best;
 }
 
 export class CuaS1FourB {

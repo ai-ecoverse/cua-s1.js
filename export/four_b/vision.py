@@ -1,6 +1,6 @@
 """Export cua-s1-4b's vision tower (Qwen3.5's ViT and patch merger, with the multimodal adapter merged) to ONNX.
 
-    uv run python -m four_b.vision --merged build/cua-s1-4b-0.1-mm/merged --out build/cua-s1-4b-0.1-mm/vision
+    uv run python -m four_b.vision --merged build/cua-s1-4b-0.2-mm/merged --out build/cua-s1-4b-0.2-mm/vision
 
 Qwen3_5VisionModel.forward derives everything that depends on the image's size from grid_thw: the bilinear
 resampling of the learned 48x48 position table, the 2D rotary angles, and the packed-sequence boundaries. Those are

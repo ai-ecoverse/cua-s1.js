@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build ONNX graphs of a merged cua-s1-4b checkpoint (four_b.merge output): build_4b.sh build/cua-s1-4b-0.1 [variant...]
+# Build ONNX graphs of a merged cua-s1-4b checkpoint (four_b.merge output): build_4b.sh build/cua-s1-4b-0.2 [variant...]
 # variants: fp32-cpu (the parity reference), q8f32-webgpu (int8 weights, fp32 activations: what the browser runs)
 set -euo pipefail
 cd "$(dirname "$0")"

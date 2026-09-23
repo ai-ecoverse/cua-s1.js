@@ -1,12 +1,12 @@
 import * as ort from "onnxruntime-web/webgpu";
 import wasm from "onnxruntime-web/ort-wasm-simd-threaded.asyncify.wasm?url";
 import mjs from "onnxruntime-web/ort-wasm-simd-threaded.asyncify.mjs?url";
-import { loadCuaS1FourB, type CuaS1FourB, type FourBOption } from "../src/four-b.ts";
+import { elementDecisions, loadCuaS1FourB, LETTERS, type CuaS1FourB, type FourBOption, type ScoredOption } from "../src/four-b.ts";
 import type { OrtModule } from "../src/model.ts";
-import textFixtures from "../fixtures/cua-s1-4b-0.1.json";
-import mmFixtures from "../fixtures/cua-s1-4b-0.1-multimodal.json";
+import textFixtures from "../fixtures/cua-s1-4b-0.2.json";
+import mmFixtures from "../fixtures/cua-s1-4b-0.2-multimodal.json";
 
-const shots = import.meta.glob("../fixtures/cua-s1-4b-0.1-multimodal/*.png", { query: "?url", import: "default", eager: true }) as Record<string, string>;
+const shots = import.meta.glob("../fixtures/cua-s1-4b-0.2-multimodal/*.png", { query: "?url", import: "default", eager: true }) as Record<string, string>;
 
 ort.env.wasm.wasmPaths = { wasm, mjs };
 ort.env.wasm.numThreads = self.crossOriginIsolated ? Math.min(8, navigator.hardwareConcurrency || 4) : 1;
@@ -15,9 +15,9 @@ ort.env.wasm.numThreads = self.crossOriginIsolated ? Math.min(8, navigator.hardw
 const HF_BASE = "https://huggingface.co/ai-ecoverse/cua-s1.js/resolve/main";
 const MODEL_BASE = new URLSearchParams(location.search).get("models") ?? (import.meta.env.VITE_MODEL_BASE as string | undefined) ?? (import.meta.env.DEV ? "models" : HF_BASE);
 
-interface Task { id: string; family: string; app: string; ax_tree: string | null; screenshot?: string; gold: string[]; options: { element_id: string; role: string; label: string; action: string; entity_id: string | null }[] }
+interface Task { id: string; family: string; app: string; goal: string | null; ax_tree: string | null; screenshot?: string; gold: string[]; options: { element_id: string; role: string; label: string; action: string; entity_id: string | null }[] }
 const modality = new URLSearchParams(location.search).get("modality") === "multimodal" ? "multimodal" : "text";
-const bundle = modality === "multimodal" ? "cua-s1-4b-0.1-multimodal" : "cua-s1-4b-0.1";
+const bundle = modality === "multimodal" ? "cua-s1-4b-0.2-multimodal" : "cua-s1-4b-0.2";
 const tasks = ((modality === "multimodal" ? mmFixtures : textFixtures) as { fixtures: Task[] }).fixtures;
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -38,20 +38,27 @@ async function pixels(t: Task) {
   return g.getImageData(0, 0, bmp.width, bmp.height);
 }
 
-tasks.forEach((t, i) => select.append(new Option(`${t.family} · ${t.app} · ${t.id.split("-").slice(-1)[0]}`, String(i))));
+// gui360_<app>_1_<episode>_<step>
+tasks.forEach((t, i) => select.append(new Option(`${t.family} · ${t.id.replace(/^gui360_/, "").replace(/_(\d+)$/, ", step $1")}`, String(i))));
 const task = () => tasks[Number(select.value)];
 const options = (t: Task): FourBOption[] => t.options.map((o) => ({ elementId: o.element_id, role: o.role, label: o.label, action: o.action, entityId: o.entity_id }));
+/** The answer key's action: every other element's gold is skip, so a ✓ there would mark nearly every row. */
+const action = (t: Task) => t.gold.filter((l) => t.options[LETTERS.indexOf(l)].action !== "skip");
+
+/** The options the model would act on: on each element, the likeliest of its actions, unless that is skip. */
+const acts = (scored: ScoredOption[]) => [...elementDecisions(scored).values()].filter((o) => o.option.action !== "skip").map((o) => o.letter);
 
 function show(probs?: number[]) {
   const t = task();
-  const best = probs ? probs.indexOf(Math.max(...probs)) : -1;
+  const chosen = probs ? acts(options(t).map((option, i) => ({ letter: LETTERS[i], option, probability: probs[i] }))) : [];
   tbody.innerHTML = "";
   options(t).forEach((o, i) => {
-    const letter = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"[i];
+    const letter = LETTERS[i];
     const tr = document.createElement("tr");
-    if (i === best) tr.className = "best";
+    if (chosen.includes(letter)) tr.className = "best";
+    if (probs) tr.dataset.p = String(probs[i]);
     const act = o.action === "fill" && o.entityId ? `fill ← ${o.entityId}` : o.action;
-    const cells = [letter, `${o.role} “${o.label}” → ${act}`, t.gold.includes(letter) ? "✓" : "", probs ? probs[i].toFixed(3) : ""];
+    const cells = [letter, `${o.role} “${o.label}” → ${act}`, action(t).includes(letter) ? "✓" : "", probs ? probs[i].toFixed(3) : ""];
     cells.forEach((c, k) => { const td = document.createElement("td"); td.textContent = c; if (k === 2) td.className = "gold"; if (k === 3) td.className = "p"; tr.append(td); });
     if (probs) { const td = document.createElement("td"); td.className = "bar"; td.append(Object.assign(document.createElement("span"), { style: `width:${(probs[i] * 100).toFixed(1)}%` })); tr.append(td); }
     tbody.append(tr);
@@ -62,7 +69,8 @@ function pick() {
   const t = task();
   if (t.screenshot) shot.src = shots[`../fixtures/${t.screenshot}`];
   else tree.value = t.ax_tree ?? "";
-  $("task-meta").textContent = `${t.options.length} options, ${t.gold.length} accepted`;
+  $("goal").textContent = t.goal ?? "";
+  $("task-meta").textContent = `${t.options.length} options`;
   $("score-meta").textContent = "";
   show();
 }
@@ -74,11 +82,16 @@ async function score() {
   const t = task();
   $<HTMLButtonElement>("score").disabled = true;
   try {
+    const goal = t.goal ?? undefined;
     const r = await model.score(options(t), modality === "multimodal"
-      ? { app: t.app, taskFamily: t.family, screenshot: await pixels(t) }
-      : { app: t.app, taskFamily: t.family, axTree: tree.value });
+      ? { app: t.app, taskFamily: t.family, goal, screenshot: await pixels(t) }
+      : { app: t.app, taskFamily: t.family, goal, axTree: tree.value });
     show(r.options.map((o) => o.probability));
-    $("score-meta").textContent = `${r.tokens} tokens in ${r.latencyMs.toFixed(0)} ms · picked ${r.best.letter}${t.gold.includes(r.best.letter) ? " ✓" : " (not in the answer key)"}`;
+    const want = action(t), did = acts(r.options);
+    const same = did.length === want.length && did.every((l) => want.includes(l));
+    $("score-meta").textContent = `${r.tokens} tokens in ${r.latencyMs.toFixed(0)} ms · `
+      + (did.length ? `would act on ${did.join(", ")}` : "would skip everything")
+      + (same ? " ✓" : ` (recorded: ${want.join(", ") || "nothing"})`);
   } finally { $<HTMLButtonElement>("score").disabled = false; }
 }
 $("score").onclick = () => void score();

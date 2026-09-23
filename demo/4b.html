@@ -11,11 +11,12 @@
   <header>
     <h1>cua-s1.js <span>cua-s1-4b in the browser</span></h1>
     <p class="sub">
-      <a href="https://huggingface.co/cua-ai/cua-s1-4b-0.1">cua-s1-4b-0.1</a> is a LoRA on Qwen3.5-4B. It is shown one
-      screen as an accessibility tree and a closed list of (element, action) options, one letter each, and picks the
-      single best next action in one forward pass, on WebGPU. The screens below come from Cua's own task generator
-      (cua-bench-s1); ✓ marks the options its answer key accepts. Cua trained two adapters: one reads the accessibility
-      tree, the other a screenshot through Qwen3.5's vision tower. Each is its own download of about 5 GB.
+      <a href="https://huggingface.co/cua-ai/cua-s1-4b-0.2">cua-s1-4b-0.2</a> is a LoRA on Qwen3.5-4B. It is given a goal,
+      one screen and a closed list of (element, action) options, one letter each, and picks the single best next action
+      in one forward pass, on WebGPU. The screens below are real Word, Excel and PowerPoint steps from
+      <a href="https://huggingface.co/datasets/vyokky/GUI-360">GUI-360</a>'s test split; ✓ marks the action that was
+      taken there, and the rows the model would act on are in bold. Cua trained two adapters: one reads the accessibility tree, the other a screenshot through Qwen3.5's
+      vision tower. Each is its own download of about 5 GB.
     </p>
     <p class="row"><a id="mode-text" href="?modality=text">Accessibility tree</a> · <a id="mode-multimodal" href="?modality=multimodal">Screenshot</a></p>
     <nav>
@@ -33,22 +34,24 @@
     <section class="panel">
       <h2>1 · The screen</h2>
       <div class="row"><select id="task"></select><span id="task-meta" class="muted"></span></div>
+      <p id="goal" class="goal"></p>
       <textarea id="tree" spellcheck="false"></textarea>
       <img id="shot" alt="the screen the model sees" hidden />
     </section>
     <section class="panel">
       <h2>2 · The decision</h2>
       <div class="row"><button id="score" disabled>Score</button><span id="score-meta" class="muted"></span></div>
-      <table id="options"><thead><tr><th></th><th>Option</th><th>Gold</th><th>p</th><th></th></tr></thead><tbody></tbody></table>
+      <table id="options"><thead><tr><th></th><th>Option</th><th>Taken</th><th>p</th><th></th></tr></thead><tbody></tbody></table>
     </section>
   </main>
 
   <footer>
     <p>
-      The adapter, its prompt format and the task generator are <a href="https://github.com/trycua/cua/tree/main/libs/cua-s1">Cua's</a>;
-      the base model is <a href="https://huggingface.co/Qwen/Qwen3.5-4B">Qwen3.5-4B</a> (Apache-2.0). The text adapter is
-      merged in fp32 and exported to ONNX with int8 weights. cua-s1-4b is a research checkpoint: read the
-      <a href="https://github.com/trycua/cua/blob/main/libs/cua-s1/MODEL_CARD.md">model card</a> before relying on it.
+      The adapters (Apache-2.0), their prompt format and the GUI-360 converter are
+      <a href="https://github.com/trycua/cua/tree/main/libs/cua-s1">Cua's</a>; the base model is
+      <a href="https://huggingface.co/Qwen/Qwen3.5-4B">Qwen3.5-4B</a> (Apache-2.0) and the screens are GUI-360's (MIT).
+      Each adapter is merged in fp32 and exported to ONNX with int8 weights. cua-s1-4b is a research checkpoint: read
+      the <a href="https://github.com/trycua/cua/blob/main/libs/cua-s1/MODEL_CARD.md">model card</a> before relying on it.
     </p>
   </footer>
   <script type="module" src="./four-b.ts"></script>
