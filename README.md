@@ -74,6 +74,13 @@ The model card reports 99.95% on its own form-disjoint test split. The misses ar
 13 of 440 fills came out as `skip`, and one filled the wrong entity (a portfolio URL field took the LinkedIn URL,
 p = 0.78). Keep a confidence threshold and look at the plan before applying it.
 
+A threshold does not catch forms outside the training vocabulary. The synthetic forms draw every field label from
+the 55 concepts in upstream's `cua_s1/concepts.py`, and on labels outside that catalogue (logistics, DevOps and
+veterinary forms, and one Chinese form) the checkpoint scored 12 of 41 and answered `skip` for 36 of the 41 elements
+at a mean confidence of 0.974 ([trycua/cua#3978](https://github.com/trycua/cua/issues/3978)). The form's own field
+labels matter most: with the same structure and values but catalogue phrases as labels, 11 of 11 were right. A plan that
+skips nearly every field on an unfamiliar form is the model being out of scope, not a form with nothing to fill.
+
 ## Development
 
 ```bash
