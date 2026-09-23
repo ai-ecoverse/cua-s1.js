@@ -47,3 +47,30 @@ export function collate(examples: Example[], contextTokens: number, optionTokens
   }));
   return { batch: B, contextLen: L, options: N, optionLen: T, contextIds, contextMask, optionIds, optionTokenMask, optionMask, counts: rows.map((r) => r.length) };
 }
+
+export interface SharedBatch {
+  batch: number;
+  contextLen: number;
+  options: number;
+  optionLen: number;
+  contextIds: BigInt64Array;
+  contextMask: Uint8Array;
+  /** [options, optionLen]: one option list for every context */
+  optionIds: BigInt64Array;
+  optionTokenMask: Uint8Array;
+}
+
+/** The layout collate() produces when every example has the same options, without the batch axis on the options. */
+export function collateShared(contexts: string[], options: string[], contextTokens: number, optionTokens: number): SharedBatch {
+  if (!contexts.length || !options.length) throw new RangeError("cannot collate an empty batch");
+  const ctx = contexts.map((c) => byteIds(c, contextTokens));
+  const opts = options.map((o) => byteIds(o, optionTokens));
+  const B = ctx.length, N = opts.length;
+  const L = Math.max(1, ...ctx.map((c) => c.length));
+  const T = Math.max(1, ...opts.map((t) => t.length));
+  const contextIds = new BigInt64Array(B * L), optionIds = new BigInt64Array(N * T);
+  const contextMask = new Uint8Array(B * L), optionTokenMask = new Uint8Array(N * T);
+  ctx.forEach((c, b) => c.forEach((id, i) => { contextIds[b * L + i] = BigInt(id); contextMask[b * L + i] = 1; }));
+  opts.forEach((tokens, n) => tokens.forEach((id, t) => { optionIds[n * T + t] = BigInt(id); optionTokenMask[n * T + t] = 1; }));
+  return { batch: B, contextLen: L, options: N, optionLen: T, contextIds, contextMask, optionIds, optionTokenMask };
+}

@@ -3,8 +3,8 @@
   "source": "cua-ai/cua-s1-forms@f54adbf447f4ca6ec259f529ee3f2e3e09f8cc71",
   "model": "r-f54adbf/model.onnx",
   "checkpoint": "r-f54adbf/checkpoint.json",
-  "sha256": "beec57a720f5e5769a65b6a1fad5aed9b71b180992143bbc2aa8abb7939346da",
-  "bytes": 3270426,
+  "sha256": "d48db2cacfb648133056331ebf7b7062c28f3e66dc5b02d6cfdec74aaeed7aa1",
+  "bytes": 3071800,
   "context_tokens": 224,
   "option_tokens": 96,
   "inputs": [
@@ -24,5 +24,22 @@
     "max_abs_dp": 3.1888484954833984e-06,
     "argmax_flips": 0,
     "top1_vs_labels": 0.9866412213740458
+  },
+  "shared_options": {
+    "model": "r-f54adbf/model-shared-options.onnx",
+    "sha256": "f13f81b075cb8ca3f50dbec519ff246b54503a2afbe7a5d7903fa568967d1afb",
+    "bytes": 3052416,
+    "inputs": [
+      "context_ids",
+      "context_mask",
+      "option_ids",
+      "option_token_mask"
+    ],
+    "parity": {
+      "decisions": 1048,
+      "max_abs_dp": 3.1888484954833984e-06,
+      "argmax_flips": 0,
+      "top1_vs_labels": 0.9866412213740458
+    }
   }
 }

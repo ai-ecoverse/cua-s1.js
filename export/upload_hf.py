@@ -2,8 +2,9 @@
 
     HF_TOKEN=... uv run python upload_hf.py --models ../public/models
 
-For each model directory: the revision's files (r-<commit>/) first, then manifest.json alone as the switch, then
-whatever the new manifest no longer names. A model card is written from the manifests."""
+For each model directory: the revision's files (r-<commit>/) and manifest.json in one commit, so a client never reads
+a manifest whose graphs are not there yet or were replaced, then whatever the new manifest no longer names. A model
+card is written from the manifests."""
 import argparse, json, os
 from huggingface_hub import HfApi
 
@@ -37,8 +38,8 @@ const plan = await model.plan("Northwind Clinic - New Patient Registration",
 
 {table}
 
-Each folder has a `manifest.json` naming its source commit, the ONNX graph's SHA-256 (checked by the loader) and
-the parity measured at export time. The graph and Cua's original JSON sidecar (`checkpoint.json`: architecture,
+Each folder has a `manifest.json` naming its source commit, the ONNX graphs' SHA-256s (checked by the loader) and
+the parity measured at export time. The graphs and Cua's original JSON sidecar (`checkpoint.json`: architecture,
 tensor signature, training metadata) live under `r-<commit>/`, so publishing a new checkpoint never changes a file
 an older manifest points at.
 
@@ -50,6 +51,11 @@ option-token axes). It takes the byte tensors `cua_s1`'s `ByteCollator` produces
 probabilities. onnxruntime matches PyTorch to within the max |Δp| in the table, on 1,048 decisions from Cua's own
 synthetic episode generator, with no argmax flips.
 
+`model-shared-options.onnx` runs the same modules for a batch whose rows all share one option list, which is every
+form plan: the options are encoded once instead of once per element. Its inputs drop the batch axis from the option
+tensors. It gives the same probabilities as `model.onnx` and is checked against the unmodified PyTorch forward on the
+same episodes.
+
 cua-s1 is a research checkpoint trained on synthetic forms. Read Cua's
 [model card](https://huggingface.co/{base}) and
 [SECURITY.md](https://github.com/trycua/cua/blob/main/libs/cua-s1/SECURITY.md) before relying on it.
@@ -57,7 +63,8 @@ cua-s1 is a research checkpoint trained on synthetic forms. Read Cua's
 
 
 def published(name, m):
-    return [f"{name}/{p}" for p in ["manifest.json", m["model"], m["checkpoint"]]]
+    graphs = [m["model"]] + ([m["shared_options"]["model"]] if "shared_options" in m else [])
+    return [f"{name}/{p}" for p in ["manifest.json", *graphs, m["checkpoint"]]]
 
 
 def main():
@@ -81,10 +88,7 @@ def main():
     remote = set(api.list_repo_files(a.repo))
     for n in names:
         files = published(n, manifests[n])
-        payload = [f for f in files if not f.endswith("/manifest.json")]
-        api.upload_folder(repo_id=a.repo, folder_path=a.models, allow_patterns=payload, commit_message=f"{n}: {manifests[n]['source']} files")
-        api.upload_file(path_or_fileobj=f"{a.models}/{n}/manifest.json", path_in_repo=f"{n}/manifest.json", repo_id=a.repo,
-                        commit_message=f"{n}: {manifests[n]['source']}")
+        api.upload_folder(repo_id=a.repo, folder_path=a.models, allow_patterns=files, commit_message=f"{n}: {manifests[n]['source']}")
         stale = sorted(f for f in remote if f.startswith(f"{n}/") and f not in files)
         if stale:
             api.delete_files(repo_id=a.repo, delete_patterns=stale, commit_message=f"{n}: drop {len(stale)} superseded files")
