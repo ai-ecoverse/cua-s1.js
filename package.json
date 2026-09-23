@@ -1,6 +1,6 @@
 {
   "name": "@ai-ecoverse/cua-s1.js",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "cua-s1 form-filling decision models in the browser via onnxruntime-web",
   "type": "module",
   "license": "MIT",
