@@ -199,6 +199,15 @@ Releases publish to npm from CI (`.github/workflows/release.yaml`, trusted publi
 patch / minor / major; `v0.1.1` is the last hand-tagged release. The demo deploys to GitHub Pages on every push to
 `main` and loads the weights from Hugging Face.
 
+## Related
+
+- [kev.js](https://github.com/ai-ecoverse/kev.js): Kev decision models in the browser, whose export pipeline the
+  cua-s1-4b bundles are built with. Its `-vision` bundles answer questions about images through the same Qwen3.5
+  vision tower.
+- [jev-omni.js](https://github.com/ai-ecoverse/jev-omni.js): the Gemma 4 12B Jev-Omni decision classifier on WebGPU.
+- [decision-vision-bench](https://github.com/ai-ecoverse/decision-vision-bench): cua-s1-4b-0.2 multimodal, Kev vision
+  and Jev-Omni on one mixed image decision set, including this repo's GUI-360 screens.
+
 ## License
 
 MIT, like cua-s1. The ported schema and planner logic keep Cua AI, Inc.'s copyright notice (`LICENSE`), and the
