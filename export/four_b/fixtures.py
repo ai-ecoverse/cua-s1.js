@@ -83,7 +83,7 @@ def main():
     run = pin(a.adapter)
     adir = snapshot(run)
     cfg = json.load(open(f"{adir}/{a.modality}/adapter_config.json"))
-    base = pin(cfg["base_model_name_or_path"])
+    base = pin(f"{cfg['base_model_name_or_path']}@{cfg.get('revision') or ''}".rstrip("@"))   # as four_b.merge pins it
     bdir = snapshot(base)
     tok = AutoTokenizer.from_pretrained(bdir)
     model = FourBModel(base_model=bdir, lora_adapter_path=adir, device=a.device, dtype="float32", modality=a.modality)

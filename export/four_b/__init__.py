@@ -14,6 +14,7 @@ def pin(repo: str) -> str:
 
 
 def snapshot(pinned: str) -> str:
+    if os.path.isdir(pinned): return pinned   # a local adapter or base, as pin() passes it through
     from huggingface_hub import snapshot_download
     name, _, rev = pinned.partition("@")
     return snapshot_download(name, revision=rev)

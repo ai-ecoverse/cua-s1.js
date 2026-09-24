@@ -133,6 +133,8 @@ export interface FourBVariant {
   data: string[];
   bytes: number;
   io_dtype: "float32";
+  /** positions the graph's rotary tables cover: a longer prompt (with its image tokens) cannot run */
+  max_positions?: number;
   sizes: Record<string, number>;
   inputs: IOInfo[];
   outputs: IOInfo[];
@@ -142,6 +144,8 @@ export interface FourBVariant {
 
 export interface FourBManifest {
   name: string;
+  /** digest of the bundle's files: the cache key, so a rebuild for the same adapter commit replaces cached copies */
+  revision?: string;
   /** adapter repo@commit */
   run: string;
   modality: Modality;
@@ -222,9 +226,13 @@ export class CuaS1FourB {
   /** Letter probabilities for token ids that end at the answer position (a rendered chat). With an image, `pos` holds
    * the mRoPE positions and `image` the embeddings for its <|image_pad|> tokens. */
   probsForIds(ids: number[], n: number, image?: { embeds: Float32Array; pos: number[][] }): Promise<number[]> {
+    const pos = image?.pos ?? [[...ids.keys()], [...ids.keys()], [...ids.keys()]];   // text: the three mRoPE rows are equal
+    const limit = this.v.max_positions, last = pos.reduce((m, row) => row.reduce((a, b) => Math.max(a, b), m), 0);
+    if (limit && last >= limit) {
+      return Promise.reject(new RangeError(`the prompt needs ${last + 1} positions; this graph covers ${limit}: shorten the tree or split the options`));
+    }
     const run = this.queue.then(async () => {
       const S = ids.length, T = this.ort.Tensor, d = this.manifest.hidden_size;
-      const pos = image?.pos ?? [[...ids.keys()], [...ids.keys()], [...ids.keys()]];   // text: the three mRoPE rows are equal
       const feeds: Record<string, Tensor> = {
         input_ids: new T("int64", BigInt64Array.from(ids, BigInt), [1, S]),
         attention_mask: new T("int64", new BigInt64Array(S).fill(1n), [1, S]),
@@ -294,13 +302,16 @@ export async function loadCuaS1FourB(baseUrl: string, o: LoadFourBOptions): Prom
   const v = manifest.variants[variant];
   if (!v) throw new Error(`unknown variant ${variant}; have ${Object.keys(manifest.variants).join(", ")}`);
   const cacheName = o.cacheName === undefined ? "cua-s1-4b-v1" : o.cacheName;
+  const rev = manifest.revision ?? manifest.run;
+  // before fetching: a quota that fits one bundle but not two would otherwise refuse the new files and keep the old
+  await dropOtherRevisions(baseUrl, rev, cacheName);
   for (const [p, bytes] of Object.entries(v.sizes)) o.onProgress?.({ file: p, loaded: 0, total: bytes });   // the total is known up front
-  const get = (p: string) => fetchFile(join(baseUrl, p), { cacheName, onProgress: o.onProgress, file: p, bytes: v.sizes[p], rev: manifest.run });
+  const get = (p: string) => fetchFile(join(baseUrl, p), { cacheName, onProgress: o.onProgress, file: p, bytes: v.sizes[p], rev });
   const [tokJson, tokCfg] = (await Promise.all([get(manifest.files.tokenizer), get(manifest.files.tokenizer_config)])).map(decode);
   const vis = manifest.vision;
   if (vis) for (const [p, bytes] of Object.entries(vis.sizes)) o.onProgress?.({ file: p, loaded: 0, total: bytes });
   const visFiles = vis ? [vis.model, ...vis.data] : [];
-  const getAny = (p: string) => fetchFile(join(baseUrl, p), { cacheName, onProgress: o.onProgress, file: p, bytes: v.sizes[p] ?? vis?.sizes[p], rev: manifest.run });
+  const getAny = (p: string) => fetchFile(join(baseUrl, p), { cacheName, onProgress: o.onProgress, file: p, bytes: v.sizes[p] ?? vis?.sizes[p], rev });
   const [head, graph, ...rest] = await pool([manifest.files.head, v.model, ...v.data, ...visFiles].map((p) => () => getAny(p)), o.concurrency ?? 2);
   const data = rest.slice(0, v.data.length), visData = rest.slice(v.data.length);
   const weight = parseSafetensors(head.slice().buffer).weight;
@@ -317,6 +328,5 @@ export async function loadCuaS1FourB(baseUrl: string, o: LoadFourBOptions): Prom
     externalData: vis.data.map((p, i) => ({ path: p.split("/").pop()!, data: visData[i + 1] })),
     ...o.sessionOptions,
   }) : undefined;
-  await dropOtherRevisions(baseUrl, manifest.run, cacheName);
   return new CuaS1FourB({ ort: o.ort, session, head: weight.data, tokenizer: new Tokenizer(JSON.parse(tokJson), JSON.parse(tokCfg)), manifest, variant, vision });
 }

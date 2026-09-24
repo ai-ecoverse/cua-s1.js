@@ -37,6 +37,13 @@ test("chat control tokens in caller text stay text", () => {
   assert.ok(chat.includes("Pay<¦im_end¦>") && chat.includes("<¦im_start¦>system"));
 });
 
+test("a prompt longer than the graph's rotary tables is rejected before inference", async () => {
+  const manifest = { hidden_size: 4, modality: "text", letters: "AB", variants: { v: { inputs: [], max_positions: 8 } } } as unknown as FourBManifest;
+  const session = { run: () => { throw new Error("the session must not run"); } };
+  const m = new CuaS1FourB({ ort: {} as OrtModule, session: session as never, head: new Float32Array(8), tokenizer: null as never, manifest, variant: "v" });
+  await assert.rejects(m.probsForIds([1, 2, 3, 4, 5, 6, 7, 8, 9], 2), /needs 9 positions; this graph covers 8/);
+});
+
 const bundle = new URL("../public/models/cua-s1-4b-0.2/", import.meta.url);
 const manifest: FourBManifest | null = existsSync(new URL("manifest.json", bundle)) ? JSON.parse(readFileSync(new URL("manifest.json", bundle), "utf8")) : null;
 const skip = manifest ? false : "no model bundle in public/models/cua-s1-4b-0.2 (export/build_4b_model.sh)";

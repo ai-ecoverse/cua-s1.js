@@ -22,7 +22,7 @@ async function readWithProgress(res: Response, file: string, onProgress?: (p: Pr
   return out;
 }
 
-/** The Cache Storage key for one file of one model revision: a new checkpoint never reads an old one's bytes. */
+/** The Cache Storage key for one file of one bundle revision: a new or rebuilt bundle never reads an old one's bytes. */
 const cacheKey = (url: string, rev?: string) => (rev ? `${url}${url.includes("?") ? "&" : "?"}rev=${encodeURIComponent(rev)}` : url);
 
 export interface FetchOptions { cacheName?: string | null; onProgress?: (p: Progress) => void; file?: string; bytes?: number; rev?: string }

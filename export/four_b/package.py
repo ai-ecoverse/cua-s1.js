@@ -8,9 +8,10 @@ r-<rev>/vision/ with its preprocessing config, and parity then runs screenshot -
 supplies Qwen's processor for it).
 
 Large files are hard-linked, not copied. Everything but the manifest lives under r-<adapter commit>/, so publishing
-a new checkpoint never overwrites a file an older manifest points at. With --fixtures, each variant's parity against
+a new checkpoint never overwrites a file an older manifest points at; the manifest's `revision` digests the files'
+contents, and the browser caches by it. With --fixtures, each variant's parity against
 FourBModel is measured (CPU EP) and recorded."""
-import argparse, json, os, shutil
+import argparse, hashlib, json, os, shutil
 import onnx
 from .fixtures import summary
 from .parity import OrtFourB, OrtVision, rope_positions, IMAGE_PAD
@@ -29,6 +30,24 @@ def io_info(model_path):
             out["empty"] = [1] + shape[1:]
         return out
     return [info(v, True) for v in m.graph.input], [info(v, False) for v in m.graph.output]
+
+
+def max_positions(model_path):
+    """How many positions the graph's rotary tables cover (postprocess.py --rope-positions): longer prompts can't run."""
+    m = onnx.load(model_path, load_external_data=False)
+    return next(t.dims[0] for t in m.graph.initializer if t.name == "cos_cache")
+
+
+def content_revision(out, files):
+    """A digest of every file the manifest names. Clients key their cache by it, so a bundle rebuilt for the same
+    adapter commit (a new exporter, a postprocessing fix) is never served from a returning client's stale copy."""
+    h = hashlib.sha256()
+    for f in sorted(files):
+        d = hashlib.sha256()
+        with open(f"{out}/{f}", "rb") as fh:
+            for chunk in iter(lambda: fh.read(1 << 24), b""): d.update(chunk)
+        h.update(f"{f}\0{d.hexdigest()}\n".encode())
+    return h.hexdigest()[:16]
 
 
 def link(src, dst):
@@ -54,8 +73,8 @@ def main():
     fixtures = None
     if a.fixtures:
         fx = json.load(open(a.fixtures))
-        if fx["run"] != meta["run"]:   # parity is only meaningful against the checkpoint the weights came from
-            raise SystemExit(f"{a.fixtures} is from {fx['run']}, but {a.build} was exported from {meta['run']}")
+        for k in ("run", "base"):   # parity is only meaningful against the checkpoint the weights came from
+            if fx[k] != meta[k]: raise SystemExit(f"{a.fixtures} has {k} {fx[k]}, but {a.build} was exported from {meta[k]}")
         fixtures = fx["fixtures"]
     shared = {f"{r}/{f}": os.path.getsize(f"{a.out}/{r}/{f}") for f in ("head.safetensors", "tokenizer.json", "tokenizer_config.json")}
     vision = None
@@ -78,6 +97,7 @@ def main():
         v = {"model": f"{vdir}/model.onnx", "data": [f"{vdir}/{f}" for f in data],
              "bytes": sum(os.path.getsize(f"{a.out}/{vdir}/{f}") for f in ["model.onnx", *data]),
              "io_dtype": next(o["type"] for o in outputs if o["name"] == "hidden_states"),
+             "max_positions": max_positions(f"{a.out}/{vdir}/model.onnx"),
              "sizes": {**{f"{vdir}/{f}": os.path.getsize(f"{a.out}/{vdir}/{f}") for f in ["model.onnx", *data]}, **shared},
              "inputs": inputs, "outputs": outputs}
         if fixtures:
@@ -108,7 +128,8 @@ def main():
             rel = os.path.relpath(os.path.join(root, f), a.out)
             if rel not in keep: os.remove(os.path.join(root, f)); print("removed stale", rel)
         if root != a.out and not os.listdir(root): os.rmdir(root)
-    manifest = {"name": os.path.basename(os.path.normpath(a.out)), **{k: meta[k] for k in ("run", "modality", "base", "hidden_size", "letters", "letter_ids")},
+    manifest = {"name": os.path.basename(os.path.normpath(a.out)), "revision": content_revision(a.out, keep - {"manifest.json"}),
+                **{k: meta[k] for k in ("run", "modality", "base", "hidden_size", "letters", "letter_ids")},
                 "files": {"head": f"{r}/head.safetensors", "tokenizer": f"{r}/tokenizer.json", "tokenizer_config": f"{r}/tokenizer_config.json"},
                 "variants": variants, **({"vision": vision} if vision else {})}
     json.dump(manifest, open(f"{a.out}/manifest.json", "w"), indent=2)
