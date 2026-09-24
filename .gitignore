@@ -6,3 +6,5 @@ export/.venv/
 __pycache__/
 .env
 .env.local
+export/build
+public/models/cua-s1-4b-*/

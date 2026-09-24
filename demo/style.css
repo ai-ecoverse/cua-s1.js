@@ -29,3 +29,11 @@ tr.skip td { color: var(--muted); } tr.dropped td:nth-child(2) { text-decoration
 tr.act td:nth-child(2) { font-weight: 600; }
 .alt { display: block; color: var(--muted); font-size: 12px; }
 footer { margin-top: 28px; border-top: 1px solid var(--line); padding-top: 14px; font-size: 13.5px; max-width: 980px; }
+main.two { grid-template-columns: 1fr 1fr; }
+textarea#tree { width: 100%; min-height: 520px; font: 12px/1.45 ui-monospace, Menlo, monospace; background: transparent; color: inherit; border: 1px solid var(--line); border-radius: 6px; padding: 8px; }
+select { font: inherit; max-width: 100%; padding: 4px 6px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: inherit; }
+td.bar { width: 30%; } td.bar span { display: block; height: 8px; border-radius: 4px; background: var(--accent); }
+tr.best td:nth-child(2) { font-weight: 600; } td.gold { color: var(--ok); }
+img#shot { width: 100%; border: 1px solid var(--line); border-radius: 6px; }
+p.goal { white-space: pre-line; margin: 8px 0; }
+a.current { font-weight: 600; text-decoration: none; color: inherit; }

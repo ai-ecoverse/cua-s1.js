@@ -11,8 +11,23 @@ dependencies = [
     "huggingface_hub",
 ]
 
+[dependency-groups]
+# cua-s1-4b: merge the LoRA, build the ONNX graph with the onnxruntime-genai model builder, and score upstream's
+# reference (cua_s1.four_b.FourBModel) on tasks from cua-bench-s1's generator. `uv sync --group four-b`
+four-b = [
+    "transformers>=5.17,<6",
+    "peft>=0.21",
+    "accelerate>=1.15",
+    "onnxruntime-genai>=0.16",
+    "onnx-ir",
+    "safetensors",
+    "torchvision",             # FourBModel.load asks for the processor, and Qwen3.5's video processor imports it
+    "cua-bench-s1",
+]
+
 [tool.uv]
 package = false
 
 [tool.uv.sources]
 cua-s1 = { path = "../vendor/cua/libs/cua-s1/python", editable = true }
+cua-bench-s1 = { path = "../vendor/cua/libs/cua-bench-s1/python", editable = true }
